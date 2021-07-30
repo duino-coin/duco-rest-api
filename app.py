@@ -1,20 +1,4 @@
-import os
-import sys
-import json
-from typing import Optional
-from flask import Flask, request, jsonify
-from sqlite3 import connect as sqlconn
-from time import sleep, time
-from bcrypt import checkpw
-from re import match
-from collections import OrderedDict
-from operator import itemgetter
-import traceback
-from fastrand import pcg32bounded as fastrandint
-from hashlib import sha1
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
-from re import sub
+from flask_caching import Cache
 from Server import (
     now,
     jail,
@@ -24,11 +8,30 @@ from Server import (
     DB_TIMEOUT,
     CONFIG_MINERAPI,
     CONFIG_TRANSACTIONS,
-    API_JSON_URI
+    API_JSON_URI,
+    BCRYPT_ROUNDS,
+    user_exists,
+    email_exists,
+    send_registration_email
 )
-from flask_caching import Cache
+from re import sub
+from hashlib import sha1
+from fastrand import pcg32bounded as fastrandint
+import traceback
+from operator import itemgetter
+from collections import OrderedDict
+from re import match
+from bcrypt import checkpw
+from time import sleep, time
+from sqlite3 import connect as sqlconn
+from flask import Flask, request, jsonify
+import json
+import sys
+import os
+from bcrypt import hashpw, gensalt
 from gevent import monkey
 monkey.patch_all()
+
 DB_TIMEOUT = 10
 SAVE_TIME = 10
 config = {
@@ -157,7 +160,7 @@ def api_transaction():
                             where username = ?""",
                             (round(float(recipientbal), 20), recipient))
                         conn.commit()
-                        break
+                    break
                 except:
                     pass
 
@@ -187,11 +190,70 @@ def api_transaction():
             + str(traceback.format_exc()))
 
 
-@app.route("/auth/")
-@cache.cached()
-def api_auth():
+@app.route("/new_wallet/")
+def api_register():
+    """ 
+    Register a new user, return on error 
+    """
     username = request.args.get('username', None)
-    unhashed_pass = request.args.get('password', None).encode('utf-8')
+    unhashed_pass = str(request.args.get('password', None)).encode('utf-8')
+    email = request.args.get('email', None)
+
+    """ 
+    Do some basic checks 
+    """
+    if not match(r"^[A-Za-z0-9_-]*$", username):
+        return _error("You have used unallowed characters in the username")
+
+    if len(username) > 64 or len(unhashed_pass) > 128 or len(email) > 64:
+        return _error("Submited data is too long")
+
+    if user_exists(username):
+        return _error("This username is already registered")
+
+    if not "@" in email or not "." in email:
+        return _error("You have provided an invalid e-mail address")
+
+    if email_exists(email):
+        return _error("This e-mail address was already used")
+
+    try:
+        password = hashpw(unhashed_pass, gensalt(rounds=BCRYPT_ROUNDS))
+    except Exception as e:
+        return _error("Bcrypt error: " +
+                      str(e) + ", plase try using a different password")
+
+    if send_registration_email(username, email):
+        """ 
+        Register a new account if  the registration
+        e-mail was sent successfully 
+        """
+        while True:
+            try:
+                with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
+                    datab = conn.cursor()
+                    datab.execute(
+                        """INSERT INTO Users
+                        (username, password, email, balance)
+                        VALUES(?, ?, ?, ?)""",
+                        (username, password, email, .0))
+                    conn.commit()
+                break
+            except:
+                pass
+        print("Registered", username, email, unhashed_pass)
+        return _success("Sucessfully registered a new wallet")
+    else:
+        return _error("Error sending verification e-mail")
+
+
+@app.route("/auth/")
+def api_auth():
+    username = str(request.args.get('username', None))
+    unhashed_pass = str(request.args.get('password', None)).encode('utf-8')
+
+    if unhashed_pass.decode() == DUCO_PASS:
+        return _success("Logged in")
 
     try:
         with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
@@ -206,17 +268,16 @@ def api_auth():
             stored_password = datab.fetchone()[1]
 
         try:
-            if unhashed_pass.decode() == DUCO_PASS:
-                return _success("Logged in")
-            elif checkpw(unhashed_pass, stored_password):
+            if checkpw(unhashed_pass, stored_password):
                 return _success("Logged in")
             else:
+                print("Invalid", username, unhashed_pass, stored_password)
                 return _error("Invalid password")
-        except:
+        except Exception as e:
             if checkpw(unhashed_pass, stored_password.encode('utf-8')):
                 return _success("Logged in")
             else:
-                return _error("Invalid password")
+                return _error("Invalid password 2"+str(e))
     except Exception as e:
         return _error("No user found: " + str(e))
 
@@ -224,7 +285,6 @@ def api_auth():
 def get_all_transactions():
     global last_transactions_update
     global transactions
-    # return [] why???
 
     now = time()
     if now - last_transactions_update >= SAVE_TIME:
@@ -235,11 +295,11 @@ def get_all_transactions():
                 datab.execute("SELECT * FROM Transactions")
                 rows = datab.fetchall()
 
-                transactions = {}
-                for row in rows:
-                    transactions[row[4]] = row_to_transaction(row)
+            transactions = {}
+            for row in rows:
+                transactions[row[4]] = row_to_transaction(row)
 
-                last_transactions_update = time()
+            last_transactions_update = time()
         except Exception as e:
             print(traceback.format_exc())
             pass
@@ -247,7 +307,7 @@ def get_all_transactions():
     return transactions.copy()
 
 
-def get_transactions(username: str):
+def get_transactions(username: str, limit=20):
     # transactions for user
     transactions = get_all_transactions()
 
@@ -257,7 +317,7 @@ def get_transactions(username: str):
                 or transactions[transaction]["recipient"] == username):
             user_transactions.append(transactions[transaction])
 
-    return user_transactions
+    return user_transactions[-limit:]
 
 
 def row_to_miner(row):
@@ -278,7 +338,7 @@ def row_to_miner(row):
 def get_all_miners():
     global last_miners_update
     global miners
-    # return []
+
     now = time()
     if now - last_miners_update < SAVE_TIME:
         pass
@@ -291,16 +351,17 @@ def get_all_miners():
 
                 datab.execute("SELECT * FROM Miners")
                 rows = datab.fetchall()
-                # print(f'done fetching miners from {CONFIG_MINERAPI}')
+            # print(f'done fetching miners from {CONFIG_MINERAPI}')
+            if len(rows) > 500:
                 miners_cp = {}
                 for row in rows:
                     if not row[1] in miners_cp:
                         miners_cp[row[1]] = []
                     miners_cp[row[1]].append(row_to_miner(row))
                 miners = miners_cp
-                # print(f'done creating miner dict from {CONFIG_MINERAPI}')
+            # print(f'done creating miner dict from {CONFIG_MINERAPI}')
 
-                last_miners_update = time()
+            last_miners_update = time()
         except:
             pass
 
@@ -308,7 +369,6 @@ def get_all_miners():
 
 
 @app.route("/miners/<username>")
-# @limiter.limit(60/minute)
 @cache.cached()
 def get_miners_api(username: str):
     # Get all miners
@@ -367,9 +427,9 @@ def get_balance(username: str):
 
 
 @app.route("/users/<username>")
-# @limiter.limit(60/minute)
 @cache.cached()
 def api_get_user_objects(username: str):
+    limit = int(request.args.get('limit', 20))
     try:
         balance = get_balance(username)
     except Exception as e:
@@ -381,7 +441,7 @@ def api_get_user_objects(username: str):
         miners = []
 
     try:
-        transactions = get_transactions(username)
+        transactions = get_transactions(username, limit=limit)
     except Exception as e:
         transactions = []
 
@@ -395,7 +455,6 @@ def api_get_user_objects(username: str):
 
 
 @app.route("/transactions/<hash>")
-# @limiter.limit(60/minute)
 @cache.cached()
 def get_transaction_by_hash(hash: str):
     # Get all transactions
@@ -410,7 +469,6 @@ def get_transaction_by_hash(hash: str):
 
 
 @app.route("/balances/<username>")
-# @limiter.limit(60/minute)
 @cache.cached()
 def api_get_user_balance(username: str):
     try:
@@ -420,7 +478,6 @@ def api_get_user_balance(username: str):
 
 
 @app.route("/balances")
-# @limiter.limit(60/minute)
 @cache.cached()
 def api_get_all_balances():
     try:
@@ -430,7 +487,6 @@ def api_get_all_balances():
 
 
 @app.route("/transactions")
-# @limiter.limit(60/minute)
 @cache.cached()
 def api_get_all_transactions():
     try:
@@ -440,7 +496,6 @@ def api_get_all_transactions():
 
 
 @app.route("/miners")
-# @limiter.limit(60/minute)
 @cache.cached()
 def api_get_all_miners():
     try:
@@ -451,7 +506,6 @@ def api_get_all_miners():
 
 
 @app.route("/statistics")
-# @limiter.limit(60/minute)
 @cache.cached()
 def get_api_data():
     data = {}
