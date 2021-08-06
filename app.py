@@ -1,3 +1,8 @@
+from gevent import monkey
+monkey.patch_all()
+
+from flask_limiter.util import get_remote_address
+from flask_limiter import Limiter
 import smtplib
 import traceback
 import requests
@@ -17,11 +22,15 @@ from Server import (
     user_exists,
     email_exists,
     send_registration_email,
-    DECIMALS
+    DECIMALS,
+    perm_ban,
+    CONFIG_BANS, CONFIG_JAIL,
+    NodeS_Overide
 )
+
 from bcrypt import hashpw, gensalt, checkpw
 from json import load
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template
 from sqlite3 import connect as sqlconn
 from time import sleep, time
 from re import match
@@ -32,20 +41,6 @@ from re import sub
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from flask_caching import Cache
-from gevent import monkey
-monkey.patch_all()
-
-DB_TIMEOUT = 10
-SAVE_TIME = 10
-config = {
-    "DEBUG": False,
-    "CACHE_TYPE": "SimpleCache",
-    "CACHE_DEFAULT_TIMEOUT": SAVE_TIME
-}
-
-app = Flask(__name__)
-app.config.from_mapping(config)
-cache = Cache(app)
 
 transactions = []
 last_transactions_update = 0
@@ -56,6 +51,49 @@ last_balances_update = 0
 last_transfer = {}
 rate_count = {}
 banlist = []
+jailedusr = []
+DB_TIMEOUT = 1
+SAVE_TIME = 10
+config = {
+    "DEBUG": False, 
+    "CACHE_TYPE": "SimpleCache", 
+    "CACHE_DEFAULT_TIMEOUT": SAVE_TIME
+}
+
+app = Flask(__name__, template_folder='config/error_pages')
+app.config.from_mapping(config)
+cache = Cache(app)
+limiter = Limiter(
+    app,
+    default_limits=["10000 per day", "1 per second"]
+)
+
+
+with open(CONFIG_JAIL, "r") as jailedfile:
+    jailedusr = jailedfile.read().splitlines()
+    for username in jailedusr:
+        jail.append(username)
+    print("Successfully loaded jailed usernames file")
+
+with open(CONFIG_BANS, "r") as bannedusrfile:
+    bannedusr = bannedusrfile.read().splitlines()
+    for username in bannedusr:
+        banlist.append(username)
+    print("Successfully loaded banned usernames file")
+
+
+@app.errorhandler(429)
+def page_not_found(e):
+    return render_template('429.html'), 429
+
+@app.errorhandler(404)
+def page_not_found(e):
+    return render_template('404.html'), 404
+
+
+@app.errorhandler(500)
+def page_not_found(e):
+    return render_template('500.html'), 500
 
 
 def _success(result, code=200):
@@ -208,6 +246,9 @@ def api_auth():
     if unhashed_pass.decode() == DUCO_PASS:
         return _success("Logged in")
 
+    if username in banlist:
+        return _error("User banned")
+
     try:
         with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
             # print(f'fetching user from {DATABASE}')
@@ -235,6 +276,7 @@ def api_auth():
 
 
 @app.route("/new_wallet/")
+@limiter.limit("3 per day")
 def api_wallet():
     username = request.args.get('username', None)
     unhashed_pass = str(request.args.get('password', None)).encode('utf-8')
@@ -282,7 +324,7 @@ def api_wallet():
 
 
 @app.route("/miners/<username>")
-@cache.cached()
+@cache.cached(timeout=SAVE_TIME)
 def get_miners_api(username: str):
     # Get all miners
     try:
@@ -293,7 +335,7 @@ def get_miners_api(username: str):
 
 
 @app.route("/users/<username>")
-@cache.cached()
+@cache.cached(timeout=SAVE_TIME)
 def api_get_user_objects(username: str):
     limit = int(request.args.get('limit', 20))
     try:
@@ -321,7 +363,7 @@ def api_get_user_objects(username: str):
 
 
 @app.route("/transactions/<hash>")
-@cache.cached()
+@cache.cached(timeout=SAVE_TIME)
 def get_transaction_by_hash(hash: str):
     # Get all transactions
     try:
@@ -335,7 +377,7 @@ def get_transaction_by_hash(hash: str):
 
 
 @app.route("/balances/<username>")
-@cache.cached()
+@cache.cached(timeout=SAVE_TIME)
 def api_get_user_balance(username: str):
     try:
         return _success(get_balance(username))
@@ -344,7 +386,7 @@ def api_get_user_balance(username: str):
 
 
 @app.route("/balances")
-@cache.cached()
+@cache.cached(timeout=SAVE_TIME)
 def api_get_all_balances():
     try:
         return _success(get_all_balances())
@@ -353,7 +395,7 @@ def api_get_all_balances():
 
 
 @app.route("/transactions")
-@cache.cached()
+@cache.cached(timeout=SAVE_TIME)
 def api_get_all_transactions():
     try:
         return _success(get_all_transactions())
@@ -362,7 +404,7 @@ def api_get_all_transactions():
 
 
 @app.route("/miners")
-@cache.cached()
+@cache.cached(timeout=SAVE_TIME)
 def api_get_all_miners():
     try:
         return _success(get_all_miners())
@@ -372,7 +414,7 @@ def api_get_all_miners():
 
 
 @app.route("/statistics")
-@cache.cached()
+@cache.cached(timeout=SAVE_TIME)
 def get_api_data():
     data = {}
     with open(API_JSON_URI, 'r') as f:
@@ -385,6 +427,7 @@ def get_api_data():
 
 
 @app.route("/exchange_request/")
+@limiter.limit("3 per day")
 def exchange_request():
     username = str(request.args.get('username', None))
     unhashed_pass = request.args.get('password', None).encode('utf-8')
@@ -395,7 +438,26 @@ def exchange_request():
     coin = str(request.args.get('coin', None))
     address = str(request.args.get('address', None))
 
-    # Check the password
+    if username in banlist:
+        return _error("User is banned")
+
+    # Check email
+    try:
+        with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
+            datab = conn.cursor()
+            datab.execute(
+                """SELECT *
+                    FROM Users
+                    WHERE username = ?""",
+                (str(username),))
+            stored_mail = datab.fetchone()[2]
+        if not email == stored_mail:
+            return _error(
+                "This e-mail is not associated with your Duino-Coin account")
+    except Exception as e:
+        return _error("No user found: " + str(e))
+
+    # Check password
     try:
         with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
             datab = conn.cursor()
@@ -415,12 +477,14 @@ def exchange_request():
         return _error("No user found: " + str(e))
 
     # Check the amount
+    if coin.lower() == "xrp" and amount < 240:
+        return _error("Minimum exchangeable amount for XRP is 240 DUCO")
     if amount < 200:
         return _error("Minimum exchangeable amount is 200 DUCO")
     if amount > 10000:
         return _error("Maximum exchangeable amount is 10000 DUCO")
 
-    if ex_type == "SELL":
+    if ex_type.upper() == "SELL":
         balance = get_balance(username)["balance"]
         if amount > balance:
             return _error("You don't have enough DUCO in your account ("
@@ -432,17 +496,17 @@ def exchange_request():
                               + "raw/master/api/v1/rates",
                               data=None).json()["result"]
     except Exception as e:
-        print("Using cached exchange data")
+        print("Using cached exchange data", traceback.format_exc())
         de_api = {
             "result": {
                 "bch": {
-                    "sell": 0.00000225,
+                    "sell": 0.000002,
                     "buy": 0.0000035,
                     "liquidity": "MEDIUM"
                 },
                 "xmg": {
-                    "sell": 0.4,
-                    "buy": 0.4,
+                    "sell": 0.5,
+                    "buy": 1,
                     "liquidity": "GOOD"
                 },
                 "lke": {
@@ -452,17 +516,17 @@ def exchange_request():
                 },
                 "trx": {
                     "sell": 0.015,
-                    "buy": 0.035,
+                    "buy": 0.0375,
                     "liquidity": "LOW"
                 },
                 "dgb": {
-                    "sell": 0.025,
-                    "buy": 0.035,
+                    "sell": 0.0225,
+                    "buy": 0.0375,
                     "liquidity": "LOW"
                 },
                 "xrp": {
                     "sell": 0.00125,
-                    "buy": 0.00315,
+                    "buy": 0.00325,
                     "liquidity": "LOW"
                 },
                 "nano": {
@@ -471,8 +535,9 @@ def exchange_request():
                     "liquidity": "LOW"
                 }
             },
-            "success": True
+            "success": true
         }
+
         de_api = de_api["result"]
     try:
         exchanged_amount = round(
@@ -526,6 +591,7 @@ def exchange_request():
 
 
 @app.route("/transaction/")
+@limiter.limit("10 per minute")
 def api_transaction():
     global last_transfer
     global banlist
@@ -536,17 +602,17 @@ def api_transaction():
     amount = request.args.get('amount', None)
     memo = request.args.get('memo', None)
 
+    if recipient in banlist:
+        return _error("NO,Cant send funds to that user")
+
     if username in banlist:
-        print("Reporting as banned", user)
-        return _error("NO,User is banned")
+        print("Banning", username, request.environ.get(
+            'HTTP_X_REAL_IP', request.remote_addr))
+        perm_ban(request.environ.get('HTTP_X_REAL_IP', request.remote_addr))
+        return _error("NO,User baned")
 
     if round(float(amount), DECIMALS) <= 0:
         return _error("NO,Incorrect amount")
-
-    if username == "aofzc" or username == "ubnt" or not recipient:
-        sleep(5)
-        print("catched")
-        return _success("OK,Successfully transferred funds")
 
     if username in rate_count:
         if rate_count[username] >= 3:
@@ -563,26 +629,28 @@ def api_transaction():
             except:
                 rate_count[username] = 1
 
-    try:
-        with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
-            # print(f'fetching user from {DATABASE}')
-            # User exists, read his password
-            datab = conn.cursor()
-            datab.execute(
-                """SELECT *
-                    FROM Users
-                    WHERE username = ?""",
-                (str(username),))
-            stored_password = datab.fetchone()[1]
-
+    overrides = [NodeS_Overide, DUCO_PASS]
+    if not unhashed_pass.decode() in overrides:
         try:
-            if not checkpw(unhashed_pass, stored_password):
-                return _error("NO,Invalid password")
-        except:
-            if not checkpw(unhashed_pass, stored_password.encode('utf-8')):
-                return _error("NO,Invalid password")
-    except Exception as e:
-        return _error("NO,No user found: " + str(e))
+            with sqlconn(DATABASE, timeout=15) as conn:
+                # print(f'fetching user from {DATABASE}')
+                # User exists, read his password
+                datab = conn.cursor()
+                datab.execute(
+                    """SELECT *
+                        FROM Users
+                        WHERE username = ?""",
+                    (str(username),))
+                stored_password = datab.fetchone()[1]
+
+            try:
+                if not checkpw(unhashed_pass, stored_password):
+                    return _error("NO,Invalid password")
+            except:
+                if not checkpw(unhashed_pass, stored_password.encode('utf-8')):
+                    return _error("NO,Invalid password")
+        except Exception as e:
+            return _error("NO,No user found: " + str(e))
 
     try:
         import random
@@ -608,7 +676,7 @@ def api_transaction():
             return _error("NO,Incorrect amount")
 
         with sqlconn(DATABASE,
-                     timeout=DB_TIMEOUT) as conn:
+                     timeout=15) as conn:
             datab = conn.cursor()
             datab.execute(
                 """SELECT *
@@ -621,7 +689,7 @@ def api_transaction():
             return _error("NO,Incorrect amount")
 
         with sqlconn(DATABASE,
-                     timeout=DB_TIMEOUT) as conn:
+                     timeout=15) as conn:
             datab = conn.cursor()
             datab.execute(
                 """SELECT *
@@ -637,7 +705,7 @@ def api_transaction():
             while True:
                 try:
                     with sqlconn(DATABASE,
-                                 timeout=DB_TIMEOUT) as conn:
+                                 timeout=15) as conn:
                         datab = conn.cursor()
                         datab.execute(
                             """UPDATE Users
@@ -656,7 +724,7 @@ def api_transaction():
 
             formatteddatetime = now().strftime("%d/%m/%Y %H:%M:%S")
             with sqlconn(CONFIG_TRANSACTIONS,
-                         timeout=DB_TIMEOUT) as conn:
+                         timeout=15) as conn:
                 datab = conn.cursor()
                 datab.execute(
                     """INSERT INTO Transactions
