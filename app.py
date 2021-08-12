@@ -1,12 +1,18 @@
 from gevent import monkey
 monkey.patch_all()
-
-from flask_limiter.util import get_remote_address
-from flask_limiter import Limiter
-import smtplib
-import traceback
-import requests
-import ssl
+from flask_caching import Cache
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from re import sub
+from hashlib import sha1
+from xxhash import xxh64
+from fastrand import pcg32bounded as fastrandint
+from re import match
+from time import sleep, time
+from sqlite3 import connect as sqlconn
+from flask import Flask, request, jsonify, render_template
+from json import load
+from bcrypt import hashpw, gensalt, checkpw
 from Server import (
     now,
     jail,
@@ -27,20 +33,13 @@ from Server import (
     CONFIG_BANS, CONFIG_JAIL,
     NodeS_Overide
 )
+import ssl
+import requests
+import traceback
+import smtplib
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
-from bcrypt import hashpw, gensalt, checkpw
-from json import load
-from flask import Flask, request, jsonify, render_template
-from sqlite3 import connect as sqlconn
-from time import sleep, time
-from re import match
-from fastrand import pcg32bounded as fastrandint
-from xxhash import xxh64
-from hashlib import sha1
-from re import sub
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from flask_caching import Cache
 
 transactions = []
 last_transactions_update = 0
@@ -52,12 +51,13 @@ last_transfer = {}
 rate_count = {}
 banlist = []
 jailedusr = []
-DB_TIMEOUT = 1
+overrides = [NodeS_Overide, DUCO_PASS]
+DB_TIMEOUT = 5
 SAVE_TIME = 10
 config = {
-    "DEBUG": False, 
-    "CACHE_TYPE": "SimpleCache", 
-    "CACHE_DEFAULT_TIMEOUT": SAVE_TIME
+    "DEBUG": False,
+    "CACHE_TYPE": "SimpleCache",
+    "CACHE_DEFAULT_TIMEOUT": 10
 }
 
 app = Flask(__name__, template_folder='config/error_pages')
@@ -82,17 +82,70 @@ with open(CONFIG_BANS, "r") as bannedusrfile:
     print("Successfully loaded banned usernames file")
 
 
+def dbg(*message):
+    print(*message)
+
+
 @app.errorhandler(429)
-def page_not_found(e):
+def perror429(e):
+    global banlist
+    global rate_count
+    dbg("/GET/429")
+
+    ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
+    if ip_addr in rate_count:
+        if rate_count[ip_addr] >= 1:
+            banlist.append(ip_addr)
+    if ip_addr in banlist:
+        print("Banning", ip_addr)
+        perm_ban(str(ip_addr), perm=True)
+    try:
+        rate_count[ip_addr] += 1
+    except:
+        rate_count[ip_addr] = 1
+
     return render_template('429.html'), 429
 
+
 @app.errorhandler(404)
-def page_not_found(e):
+def rror404(e):
+    global banlist
+    global rate_count
+    dbg("/GET/404")
+
+    ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
+    if ip_addr in rate_count:
+        if rate_count[ip_addr] >= 3:
+            banlist.append(ip_addr)
+    if ip_addr in banlist:
+        print("Banning", ip_addr)
+        perm_ban(str(ip_addr))
+    try:
+        rate_count[ip_addr] += 1
+    except:
+        rate_count[ip_addr] = 1
+
     return render_template('404.html'), 404
 
 
 @app.errorhandler(500)
-def page_not_found(e):
+def error500(e):
+    global banlist
+    global rate_count
+    dbg("/GET/500")
+
+    ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
+    if ip_addr in rate_count:
+        if rate_count[ip_addr] >= 3:
+            banlist.append(ip_addr)
+    if ip_addr in banlist:
+        print("Banning", ip_addr)
+        perm_ban(str(ip_addr))
+    try:
+        rate_count[ip_addr] += 1
+    except:
+        rate_count[ip_addr] = 1
+
     return render_template('500.html'), 500
 
 
@@ -172,7 +225,7 @@ def get_all_miners():
                         miners_cp[row[1]] = []
                     miners_cp[row[1]].append(row_to_miner(row))
                 miners = miners_cp
-                last_miners_update = time()
+            last_miners_update = time()
         except:
             pass
 
@@ -238,10 +291,18 @@ def get_balance(username: str):
     return balance
 
 
+@app.route("/ping/")
+@cache.cached(timeout=SAVE_TIME)
+def ping():
+    return _success("Pong!")
+
+
 @app.route("/auth/")
+@limiter.limit("2 per minute")
 def api_auth():
     username = str(request.args.get('username', None))
     unhashed_pass = str(request.args.get('password', None)).encode('utf-8')
+    dbg("/GET/auth", username, unhashed_pass)
 
     if unhashed_pass.decode() == DUCO_PASS:
         return _success("Logged in")
@@ -265,6 +326,7 @@ def api_auth():
             if checkpw(unhashed_pass, stored_password):
                 return _success("Logged in")
             else:
+                print("Invalid", unhashed_pass, username)
                 return _error("Invalid password")
         except Exception as e:
             if checkpw(unhashed_pass, stored_password.encode('utf-8')):
@@ -276,11 +338,12 @@ def api_auth():
 
 
 @app.route("/new_wallet/")
-@limiter.limit("3 per day")
+@limiter.limit("1 per day")
 def api_wallet():
     username = request.args.get('username', None)
     unhashed_pass = str(request.args.get('password', None)).encode('utf-8')
     email = request.args.get('email', None)
+    dbg("/GET/new_wallet", username, unhashed_pass, email)
 
     if not match(r"^[A-Za-z0-9_-]*$", username):
         return _error("You have used unallowed characters in the username")
@@ -432,6 +495,8 @@ def exchange_request():
     username = str(request.args.get('username', None))
     unhashed_pass = request.args.get('password', None).encode('utf-8')
     email = str(request.args.get('email', None))
+
+    dbg("/GET/exchange_request", username, email)
 
     ex_type = str(request.args.get('type', None)).upper()
     amount = float(request.args.get('amount', None))
@@ -591,7 +656,7 @@ def exchange_request():
 
 
 @app.route("/transaction/")
-@limiter.limit("10 per minute")
+@limiter.limit("2 per minute")
 def api_transaction():
     global last_transfer
     global banlist
@@ -600,7 +665,10 @@ def api_transaction():
     unhashed_pass = request.args.get('password', None).encode('utf-8')
     recipient = request.args.get('recipient', None)
     amount = request.args.get('amount', None)
-    memo = request.args.get('memo', None)
+    memo = request.args.get('memo', None)[0:30]
+    memo = sub(r'[^A-Za-z0-9 .()-:/!#_+-]+', ' ', str(memo))
+
+    dbg("/GET/transaction", username, amount, recipient, memo)
 
     if recipient in banlist:
         return _error("NO,Cant send funds to that user")
@@ -608,11 +676,21 @@ def api_transaction():
     if username in banlist:
         print("Banning", username, request.environ.get(
             'HTTP_X_REAL_IP', request.remote_addr))
-        perm_ban(request.environ.get('HTTP_X_REAL_IP', request.remote_addr))
+        perm_ban(str(request.environ.get(
+            'HTTP_X_REAL_IP', request.remote_addr)), perm=True)
         return _error("NO,User baned")
+
+    if memo == "-" or memo == "":
+        memo = "None"
 
     if round(float(amount), DECIMALS) <= 0:
         return _error("NO,Incorrect amount")
+
+    if not user_exists(username):
+        return _error("NO,User doesnt exist")
+
+    if not user_exists(recipient):
+        return _error("NO,Recipient doesnt exist")
 
     if username in rate_count:
         if rate_count[username] >= 3:
@@ -629,7 +707,6 @@ def api_transaction():
             except:
                 rate_count[username] = 1
 
-    overrides = [NodeS_Overide, DUCO_PASS]
     if not unhashed_pass.decode() in overrides:
         try:
             with sqlconn(DATABASE, timeout=15) as conn:
@@ -651,6 +728,8 @@ def api_transaction():
                     return _error("NO,Invalid password")
         except Exception as e:
             return _error("NO,No user found: " + str(e))
+    else:
+        memo = str(memo) + " OVERRIDE"
 
     try:
         import random
@@ -663,11 +742,6 @@ def api_transaction():
             global_last_block_hash_cp = xxh64(
                 bytes(str(username)+str(amount)+str(random),
                       encoding='ascii'), seed=2811).hexdigest()
-
-        memo = sub(r'[^A-Za-z0-9 .()-:/!#_+-]+', ' ', str(memo))
-
-        if memo == "-" or memo == "":
-            memo = "None"
 
         if str(recipient) == str(username):
             return _error("NO,You\'re sending funds to yourself")
@@ -688,15 +762,18 @@ def api_transaction():
         if (float(balance) <= float(amount)):
             return _error("NO,Incorrect amount")
 
-        with sqlconn(DATABASE,
-                     timeout=15) as conn:
-            datab = conn.cursor()
-            datab.execute(
-                """SELECT *
-                    FROM Users
-                    WHERE username = ?""",
-                (recipient,))
-            recipientbal = float(datab.fetchone()[3])
+        try:
+            with sqlconn(DATABASE,
+                         timeout=15) as conn:
+                datab = conn.cursor()
+                datab.execute(
+                    """SELECT *
+                        FROM Users
+                        WHERE username = ?""",
+                    (recipient,))
+                recipientbal = float(datab.fetchone()[3])
+        except:
+            return _error("NO,Recipient doesn\'t exist")
 
         if float(balance) >= float(amount):
             balance -= float(amount)
