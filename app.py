@@ -39,6 +39,7 @@ import traceback
 import smtplib
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from flask_ipban import IpBan
 
 
 transactions = []
@@ -67,7 +68,8 @@ limiter = Limiter(
     app,
     default_limits=["10000 per day", "1 per second"]
 )
-
+ip_ban = IpBan(ban_seconds=60)
+ip_ban.init_app(app)
 
 with open(CONFIG_JAIL, "r") as jailedfile:
     jailedusr = jailedfile.read().splitlines()
@@ -82,69 +84,38 @@ with open(CONFIG_BANS, "r") as bannedusrfile:
     print("Successfully loaded banned usernames file")
 
 
+
 def dbg(*message):
-    print(*message)
+    pass
+    #print(*message)
 
 
 @app.errorhandler(429)
 def perror429(e):
-    global banlist
-    global rate_count
-    dbg("/GET/429")
-
     ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
-    if ip_addr in rate_count:
-        if rate_count[ip_addr] >= 1:
-            banlist.append(ip_addr)
-    if ip_addr in banlist:
-        print("Banning", ip_addr)
-        perm_ban(str(ip_addr), perm=True)
-    try:
-        rate_count[ip_addr] += 1
-    except:
-        rate_count[ip_addr] = 1
+    dbg("/GET/429", ip_addr)
+
+    ip_ban.add(ip=ip_addr)
 
     return render_template('429.html'), 429
 
 
 @app.errorhandler(404)
 def rror404(e):
-    global banlist
-    global rate_count
+    ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
     dbg("/GET/404")
 
-    ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
-    if ip_addr in rate_count:
-        if rate_count[ip_addr] >= 3:
-            banlist.append(ip_addr)
-    if ip_addr in banlist:
-        print("Banning", ip_addr)
-        perm_ban(str(ip_addr))
-    try:
-        rate_count[ip_addr] += 1
-    except:
-        rate_count[ip_addr] = 1
+    ip_ban.add(ip=ip_addr)
 
     return render_template('404.html'), 404
 
 
 @app.errorhandler(500)
 def error500(e):
-    global banlist
-    global rate_count
+    ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
     dbg("/GET/500")
 
-    ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
-    if ip_addr in rate_count:
-        if rate_count[ip_addr] >= 3:
-            banlist.append(ip_addr)
-    if ip_addr in banlist:
-        print("Banning", ip_addr)
-        perm_ban(str(ip_addr))
-    try:
-        rate_count[ip_addr] += 1
-    except:
-        rate_count[ip_addr] = 1
+    ip_ban.add(ip=ip_addr)
 
     return render_template('500.html'), 500
 
@@ -154,6 +125,8 @@ def _success(result, code=200):
 
 
 def _error(string, code=200):
+    ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
+    ip_ban.add(ip=ip_addr)
     return jsonify(success=False, message=string), code
 
 
@@ -623,7 +596,7 @@ def exchange_request():
                 Amount: <b>""" + str(amount) + """</b> DUCO<br>
 
                 Email: <b>""" + str(email) + """</b><br>
-                
+
                 Address: <b>""" + str(address) + """</b><br>
                 Send: <b>""" + str(exchanged_amount) + """</b> """ + coin.upper() + """<br>
             </p>
