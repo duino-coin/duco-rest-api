@@ -26,26 +26,39 @@ from xxhash import xxh64
 from fastrand import pcg32bounded as fastrandint
 
 from Server import (
-    now,
-    jail,
-    global_last_block_hash,
-    DATABASE,
-    DUCO_EMAIL,
-    DUCO_PASS,
-    DB_TIMEOUT,
-    CONFIG_MINERAPI,
-    CONFIG_TRANSACTIONS,
-    API_JSON_URI,
-    BCRYPT_ROUNDS,
-    user_exists,
-    email_exists,
-    send_registration_email,
-    DECIMALS, perm_ban,
-    CONFIG_BANS, CONFIG_JAIL,
-    CONFIG_WHITELIST,
-    NodeS_Overide,
-    CAPTCHA_SECRET_KEY
+    now, SAVE_TIME
+    jail, global_last_block_hash,
+    DATABASE, DUCO_EMAIL, DUCO_PASS,
+    DB_TIMEOUT, CONFIG_MINERAPI,
+    CONFIG_TRANSACTIONS, API_JSON_URI,
+    BCRYPT_ROUNDS, user_exists,
+    email_exists, send_registration_email,
+    DECIMALS, perm_ban, CONFIG_BANS, 
+    CONFIG_JAIL, CONFIG_WHITELIST,
+    NodeS_Overide, CAPTCHA_SECRET_KEY
 )
+
+def forwarded_ip_check():
+    return request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
+
+config = {
+    "DEBUG": False,
+    "CACHE_TYPE": "SimpleCache",
+    "CACHE_DEFAULT_TIMEOUT": 10}
+
+app = Flask(__name__, template_folder='config/error_pages')
+app.config.from_mapping(config)
+cache = Cache(app)
+
+limiter = Limiter(
+    key_func=forwarded_ip_check,
+    default_limits=["5000 per day", "1 per 2 second"])
+limiter.init_app(app)
+
+ip_ban = IpBan(ban_seconds=60*60, ban_count=10,
+               persist=True, record_dir="config/ipbans/",
+               ipc=True, secret_key=DUCO_PASS)
+ip_ban.init_app(app)
 
 transactions = []
 last_transactions_update = 0
@@ -57,15 +70,9 @@ last_transfer = {}
 rate_count = {}
 cached_logins = {}
 banlist = []
+registrations = []
 jailedusr = []
 overrides = [NodeS_Overide, DUCO_PASS]
-DB_TIMEOUT = 1
-SAVE_TIME = 10
-config = {
-    "DEBUG": False,
-    "CACHE_TYPE": "SimpleCache",
-    "CACHE_DEFAULT_TIMEOUT": SAVE_TIME
-}
 html_exc = """\
 <html>
   <body>
@@ -87,25 +94,6 @@ html_exc = """\
   </body>
 </html>
 """
-
-
-def mycheck():
-    return request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
-
-
-app = Flask(__name__, template_folder='config/error_pages')
-app.config.from_mapping(config)
-cache = Cache(app)
-limiter = Limiter(
-    key_func=mycheck,
-    default_limits=["5000 per day", "1 per 2 second"],
-)
-
-ip_ban = IpBan(ban_seconds=60*60, ban_count=10,
-               persist=True, record_dir="config/ipbans/",
-               ipc=True, secret_key=DUCO_PASS)
-limiter.init_app(app)
-ip_ban.init_app(app)
 
 with open(CONFIG_JAIL, "r") as jailedfile:
     jailedusr = jailedfile.read().splitlines()
@@ -407,9 +395,6 @@ def api_auth(username):
                     return _error("Invalid password")
         except Exception as e:
             return _error("DB Err: " + str(e))
-
-
-registrations = []
 
 
 @app.route("/register/")
