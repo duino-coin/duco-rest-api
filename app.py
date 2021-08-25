@@ -1,3 +1,11 @@
+#!/usr/bin/env python3
+"""
+Duino-Coin REST API © MIT licensed
+https://duinocoin.com
+https://github.com/revoxhere/duino-coin-rest-api
+Duino-Coin Team & Community 2019-2021
+"""
+
 import gevent.monkey
 gevent.monkey.patch_all()
 
@@ -451,7 +459,7 @@ def register():
                 VALUES(?, ?, ?, ?, ?)""",
                 (username, password, email, .0, created))
             conn.commit()
-        dgb("Registered", username, email, unhashed_pass)
+        dbg("Registered", username, email, unhashed_pass)
         registrations.append(ip_addr)
         return _success("Sucessfully registered a new wallet")
     else:
@@ -575,7 +583,7 @@ def exchange_request():
     coin = str(request.args.get('coin', None)).lower()
     address = str(request.args.get('address', None))
 
-    dgb("/GET/exchange_request", username, email)
+    dbg("/GET/exchange_request", username, email)
 
     if username in banlist:
         return _error("User is banned")
@@ -819,7 +827,7 @@ def api_transaction():
 
     if username in last_transfer:
         if (now() - last_transfer[username]).total_seconds() <= 30:
-            dgb("Rate limiting", username,
+            dbg("Rate limiting", username,
                   (now() - last_transfer[username]).total_seconds(), "s")
             return _error(
                 "NO,Please wait some time before doing the next transaction")
@@ -934,7 +942,7 @@ def api_transaction():
                         memo))
                 conn.commit()
 
-            dgb("Successfully transferred", amount, "from",
+            dbg("Successfully transferred", amount, "from",
                   username, "to", recipient, global_last_block_hash_cp)
             last_transfer[username] = now()
             return _success("OK,Successfully transferred funds,"
