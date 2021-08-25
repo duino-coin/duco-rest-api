@@ -26,7 +26,7 @@ from xxhash import xxh64
 from fastrand import pcg32bounded as fastrandint
 
 from Server import (
-    now, SAVE_TIME
+    now, SAVE_TIME,
     jail, global_last_block_hash,
     DATABASE, DUCO_EMAIL, DUCO_PASS,
     DB_TIMEOUT, CONFIG_MINERAPI,
@@ -499,8 +499,7 @@ def api_get_user_objects(username: str):
 @app.route("/transactions/<hash>")
 @cache.cached(timeout=SAVE_TIME)
 def get_transaction_by_hash(hash: str):
-    dbg("/GET/transactions/"+str(hash))
-    # Get all transactions
+    # dbg("/GET/transactions/"+str(hash))
     try:
         transactions = get_all_transactions()
         for transaction in transactions:
@@ -573,7 +572,7 @@ def exchange_request():
     email = str(request.args.get('email', None))
     ex_type = str(request.args.get('type', None)).upper()
     amount = int(request.args.get('amount', None))
-    coin = str(request.args.get('coin', None))
+    coin = str(request.args.get('coin', None)).lower()
     address = str(request.args.get('address', None))
 
     dgb("/GET/exchange_request", username, email)
@@ -643,8 +642,8 @@ def exchange_request():
             de_api[coin.lower()][ex_type.lower()]*amount,
             len(str(de_api[coin.lower()][ex_type.lower()]))
         )
-    except Exception as e:
-        return _error("That coin isn't listed (yet): " + str(e))
+    except Exception:
+        return _error("That coin isn't listed")
 
     # Send exchange request
     html = """\
