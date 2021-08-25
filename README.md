@@ -5,25 +5,40 @@ It differs by having caching and some other small improvements or fixes. At this
 
 API endpoints can be accessed on the `https://server.duinocoin.com/<query>` URL.
 
-##
-
-## Host it yourself
+### Host it yourself
 
 1. Install requirements using `pip3 install -r requirements.txt`
 2. Run it using `gunicorn app:app` 
 3. Locally, this is available on `127.0.0.1:5000`
 
-##
-
 ## API Endpoints
 
-### User info (balance, transactions & miners)
+#### User
+* `/users/<username>` - [return username's balance, last transactions and miners in one request](#/users/<username>)
+* `/auth/<username>/?password=<password>` - check username's password
 
-- **URL**: `/users/<username>`
+#### Transactions
+* `/transactions` - [return **all** transactions](/transactions)
+* `/transactions/<hash>` - [return transaction with that hash](#/transactions/<hash>)
+* `/transaction?username=<username>&password=<password>&recipient=<recipient>&amount=<amount>&memo=memo` - transfer funds from username to recipient
 
-- **Method**: `GET`
+#### Miners
+* `/miners` - [return **all** miners](#/miners)
+* `/miners/<username>` - return username's miners
 
-- **Example success response** (Code: `200`):
+#### Balances
+* `/balances` - [return **all** balances](#/balances)
+* `/balances/<username>` - [return username's balance](#/balances/<username>)
+
+#### Other
+* `/statistics` - [return server statistics (same as /api.json)](/statistics)
+* `/exchange_request/?username=<username>&password=<password>&email=<email>&type=<ex_type>&amount=<amount>&coin=<coin>&address=<address>` - submit exchange request in the DUCO Exchange
+
+##
+
+### `/users/<username>`
+
+- Example GET success response:
 
   ```json
   {
@@ -61,13 +76,9 @@ API endpoints can be accessed on the `https://server.duinocoin.com/<query>` URL.
   }
   ```
 
-### All transactions grouped by username
+### `/transactions`
 
-- **URL**: `/transactions`
-
-- **Method**: `GET`
-
-- **Example success response** (Code: `200`):
+- Example GET success response:
 
   ```json
   {
@@ -105,13 +116,9 @@ API endpoints can be accessed on the `https://server.duinocoin.com/<query>` URL.
   }
   ```
 
-### Transaction by hash
+### `/transactions/<hash>`
 
-- **URL**: `/transactions/<hash>`
-
-- **Method**: `GET`
-
-- **Example success response** (Code: `200`):
+- Example GET success response:
 
   ```json
   {
@@ -127,13 +134,9 @@ API endpoints can be accessed on the `https://server.duinocoin.com/<query>` URL.
   }
   ```
 
-### All balances
+### `/balances`
 
-- **URL**: `/balances`
-
-- **Method**: `GET`
-
-- **Example success response** (Code: `200`):
+- Example GET success response:
 
   ```json
   {
@@ -155,13 +158,9 @@ API endpoints can be accessed on the `https://server.duinocoin.com/<query>` URL.
   }
   ```
 
-### Balance of user
+### `/balances/<username>`
 
-- **URL**: `/balances/<username>`
-
-- **Method**: `GET`
-
-- **Example success response** (Code: `200`):
+- Example GET success response:
 
   ```json
   {
@@ -174,13 +173,9 @@ API endpoints can be accessed on the `https://server.duinocoin.com/<query>` URL.
   ```
 
 
-### All miners
+### `/miners`
 
-- **URL**: `/miners`
-
-- **Method**: `GET`
-
-- **Example success response** (Code: `200`):
+- Example GET success response:
 
   ```json
   {
@@ -216,13 +211,9 @@ API endpoints can be accessed on the `https://server.duinocoin.com/<query>` URL.
   }
   ```
 
-### Server statistics (same as api.json)
+### `/statistics`
 
-- **URL**: `/statistics`
-
-- **Method**: `GET`
-
-- **Example success response** (Code: `200`):
+- Example GET success response:
 
   ```json
   {
@@ -257,3 +248,4 @@ API endpoints can be accessed on the `https://server.duinocoin.com/<query>` URL.
   }
   ```
   
+More docs to come in the future
