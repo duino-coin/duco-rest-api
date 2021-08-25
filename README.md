@@ -14,24 +14,24 @@ API endpoints can be accessed on the `https://server.duinocoin.com/<query>` URL.
 ## API Endpoints
 
 #### User
-* `/users/<username>` - [return username's balance, last transactions and miners in one request](#/users/<username>)
+* `/users/<username>` - [return username's balance, last transactions and miners in one request](#usersusername)
 * `/auth/<username>/?password=<password>` - check username's password
 
 #### Transactions
-* `/transactions` - [return **all** transactions](/transactions)
-* `/transactions/<hash>` - [return transaction with that hash](#/transactions/<hash>)
+* `/transactions` - [return **all** transactions](#transactions-1)
+* `/transactions/<hash>` - [return transaction with that hash](#transactionshash)
 * `/transaction?username=<username>&password=<password>&recipient=<recipient>&amount=<amount>&memo=memo` - transfer funds from username to recipient
 
 #### Miners
-* `/miners` - [return **all** miners](#/miners)
+* `/miners` - [return **all** miners](#miners-1)
 * `/miners/<username>` - return username's miners
 
 #### Balances
-* `/balances` - [return **all** balances](#/balances)
-* `/balances/<username>` - [return username's balance](#/balances/<username>)
+* `/balances` - [return **all** balances](#balances-1)
+* `/balances/<username>` - [return username's balance](#balancesusername)
 
 #### Other
-* `/statistics` - [return server statistics (same as /api.json)](/statistics)
+* `/statistics` - [return server statistics (same as /api.json)](#statistics)
 * `/exchange_request/?username=<username>&password=<password>&email=<email>&type=<ex_type>&amount=<amount>&coin=<coin>&address=<address>` - submit exchange request in the DUCO Exchange
 
 ##
