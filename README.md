@@ -1,9 +1,10 @@
-# duco-rest-api
+# Duino-Coin REST API
 
-This is a forked version of [dansinclair25's original duco-rest-api](https://github.com/dansinclair25/duco-rest-api) that's currently being used on the Duino-Coin master server.<br>
-It differs by having caching and some other small improvements or fixes. At this point it doesn't have all the "original" calls, but they will be added as soon as I'll have some free time.
+A forked version of [dansinclair25's original duco-rest-api](https://github.com/dansinclair25/duco-rest-api) that's currently being used on the Duino-Coin master server.<br>
+It differs by having caching and some other small improvements or fixes.<br>
+At this point it doesn't have all the "original" calls, but they will be added as soon as I'll have some free time.
 
-API endpoints can be accessed on the `https://server.duinocoin.com/<query>` URL.
+API endpoints can be accessed on the `https://server.duinocoin.com/<endpoint>` URL.
 
 ### Host it yourself
 
