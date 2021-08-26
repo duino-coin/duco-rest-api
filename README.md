@@ -34,6 +34,7 @@ API endpoints can be accessed on the `https://server.duinocoin.com/<endpoint>` U
 #### Other
 * `/statistics` - [return server statistics (same as /api.json)](#statistics)
 * `/exchange_request/?username=<username>&password=<password>&email=<email>&type=<ex_type>&amount=<amount>&coin=<coin>&address=<address>` - submit exchange request in the DUCO Exchange
+* `/all_pools` - return all non-hidden mining pools
 
 ##
 
