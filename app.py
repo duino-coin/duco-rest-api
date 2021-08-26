@@ -34,7 +34,7 @@ from xxhash import xxh64
 from fastrand import pcg32bounded as fastrandint
 
 from Server import (
-    now, SAVE_TIME,
+    now, SAVE_TIME, POOL_DATABASE,
     jail, global_last_block_hash,
     DATABASE, DUCO_EMAIL, DUCO_PASS,
     DB_TIMEOUT, CONFIG_MINERAPI,
@@ -345,6 +345,33 @@ def test500():
     dbg("/GET/500 test")
     return render_template('500.html'), 200
 
+
+@app.route("/all_pools")
+@cache.cached(timeout=SAVE_TIME)
+def all_pools():
+    pools = []
+    try:
+        with sqlconn(POOL_DATABASE, timeout=DB_TIMEOUT) as conn:
+            datab = conn.cursor()
+            datab.execute("SELECT * FROM PoolList")
+            data = datab.fetchall()
+
+        for row in data:
+            if row[5] != "True":
+                pool = {
+                    "name":          row[1],
+                    "ip":            row[2],
+                    "port":          row[3],
+                    "status":        row[4],
+                    "cpu":           row[6],
+                    "ram":           row[7],
+                    "connections":   row[8],
+                }
+                pools.append(pool)
+
+        return _success(pools)
+    except Exception as e:
+        return _error(str(e))
 
 @app.route("/auth/<username>")
 @limiter.limit("30 per minute")
