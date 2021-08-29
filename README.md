@@ -14,8 +14,8 @@
 
 ## REST API documentation
 
-This repository contains the source code and documentation for the Duino-Coin REST API.<br>
-It's worth nothing that this is a forked version of [dansinclair25's original duco-rest-api](https://github.com/dansinclair25/duco-rest-api).<br>
+This repository contains the source code and documentation for the Duino-Coin REST API that's currently in use on the Duino-Coin master server.<br>
+It's worth noting that this is a forked version of dansinclair25's original [duco-rest-api](https://github.com/dansinclair25/duco-rest-api).<br>
 
 API endpoints can be accessed on the `https://server.duinocoin.com/<endpoint>` URL.
 
@@ -27,27 +27,27 @@ API endpoints can be accessed on the `https://server.duinocoin.com/<endpoint>` U
 
 ## API Endpoints
 
-#### User
-* `/users/<username>` - [return username's balance, last transactions and miners in one request](#usersusername)
-* `/auth/<username>/?password=<password>` - check username's password
+- User data
+  - `/users/<username>` - return username's balance, last transactions and miners in one request [example](#usersusername)
+  - `/auth/<username>/?password=<password>` - check username's password
 
-#### Transactions
-* `/transactions` - [return **all** transactions](#transactions-1)
-* `/transactions/<hash>` - [return transaction with that hash](#transactionshash)
-* `/transaction?username=<username>&password=<password>&recipient=<recipient>&amount=<amount>&memo=memo` - transfer funds from username to recipient
+- Transactions
+  - `/transactions` - return **all** transactions [example](#transactions-1)
+  - `/transactions/<hash>` - return transaction with that hash [example](#transactionshash)
+  - `/transaction?username=<username>&password=<password>&recipient=<recipient>&amount=<amount>&memo=memo` - transfer funds from username to recipient
 
-#### Miners
-* `/miners` - [return **all** miners](#miners-1)
-* `/miners/<username>` - return username's miners
+- Miners
+  - `/miners` - return **all** miners [example](#miners-1)
+  - `/miners/<username>` - return username's miners
 
-#### Balances
-* `/balances` - [return **all** balances](#balances-1)
-* `/balances/<username>` - [return username's balance](#balancesusername)
+- Balances
+  - `/balances` - return **all** balances [example](#balances-1)
+  - `/balances/<username>` - return username's balance [example](#balancesusername)
 
-#### Other
-* `/statistics` - [return server statistics (same as /api.json)](#statistics)
-* `/exchange_request/?username=<username>&password=<password>&email=<email>&type=<ex_type>&amount=<amount>&coin=<coin>&address=<address>` - submit exchange request in the DUCO Exchange
-* `/all_pools` - return all non-hidden mining pools
+- Other
+  - `/statistics` - return server statistics (same as /api.json) [example](#statistics)
+  - `/exchange_request/?username=<username>&password=<password>&email=<email>&type=<ex_type>&amount=<amount>&coin=<coin>&address=<address>` - submit exchange request in the DUCO Exchange
+  - `/all_pools` - return all non-hidden mining pools
 
 ##
 
