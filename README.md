@@ -1,12 +1,25 @@
-# Duino-Coin REST API
+<!--
+*** Official Duino-Coin rest api README
+*** by revoxhere, 2021
+-->
 
-A forked version of [dansinclair25's original duco-rest-api](https://github.com/dansinclair25/duco-rest-api) that's currently being used on the Duino-Coin master server.<br>
-It differs by having caching and some other small improvements or fixes.<br>
-At this point it doesn't have all the "original" calls, but they will be added as soon as I'll have some free time.
+<a href="https://duinocoin.com">
+  <img src="api.png" width="215px" align="right"/>
+</a>
+
+
+<a href="https://duinocoin.com">
+  <img src="https://github.com/revoxhere/duino-coin/blob/master/Resources/ducobanner.png?raw=true" width="430px"/>
+</a>
+
+## REST API documentation
+
+This repository contains the source code and documentation for the Duino-Coin REST API.<br>
+It's worth nothing that this is a forked version of [dansinclair25's original duco-rest-api](https://github.com/dansinclair25/duco-rest-api).<br>
 
 API endpoints can be accessed on the `https://server.duinocoin.com/<endpoint>` URL.
 
-### Host it yourself
+#### Host it yourself
 
 1. Install requirements using `pip3 install -r requirements.txt`
 2. Run it using `gunicorn app:app` 
