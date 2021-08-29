@@ -32,16 +32,16 @@ API endpoints can be accessed on the `https://server.duinocoin.com/<endpoint>` U
   - `/auth/<username>/?password=<password>` - check username's password
 
 - Transactions
-  - `/transactions` - return **all** transactions [example](#transactions-1)
+  - `/transactions` - return **all** transactions [example](#transactions)
   - `/transactions/<hash>` - return transaction with that hash [example](#transactionshash)
   - `/transaction?username=<username>&password=<password>&recipient=<recipient>&amount=<amount>&memo=memo` - transfer funds from username to recipient
 
 - Miners
-  - `/miners` - return **all** miners [example](#miners-1)
+  - `/miners` - return **all** miners [example](#miners)
   - `/miners/<username>` - return username's miners
 
 - Balances
-  - `/balances` - return **all** balances [example](#balances-1)
+  - `/balances` - return **all** balances [example](#balances)
   - `/balances/<username>` - return username's balance [example](#balancesusername)
 
 - Other
