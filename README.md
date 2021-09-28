@@ -33,7 +33,9 @@ API endpoints can be accessed on the `https://server.duinocoin.com/<endpoint>` U
 
 - Transactions
   - `/transactions` - return **all** transactions [example](#transactions)
-  - `/transactions/<hash>` - return transaction with that hash [example](#transactionshash)
+  - `/user_transactions/<username>` - return transactions related to username
+  - `/id_transactions/<id>` - return a transaction with that id
+  - `/transactions/<hash>` - return a transaction with that hash [example](#transactionshash)
   - `/transaction?username=<username>&password=<password>&recipient=<recipient>&amount=<amount>&memo=memo` - transfer funds from username to recipient
 
 - Miners
@@ -82,6 +84,7 @@ API endpoints can be accessed on the `https://server.duinocoin.com/<endpoint>` U
             "datetime":"22/06/2021 11:54:13",
             "hash":"18514d5a1e7c6f33c7bc8b3751e8b5ca1bfa9682",
             "memo":"None",
+            "id":2811,
             "recipient":"Bilaboz",
             "sender":"revox"
          }
@@ -105,7 +108,8 @@ API endpoints can be accessed on the `https://server.duinocoin.com/<endpoint>` U
             "hash":"54587c23cbd729dba4c44f20cdf60a9321e3deb1",
             "memo":"DUCO Exchange transaction",
             "recipient":"coinexchange",
-            "sender":"1crtsk"
+            "sender":"1crtsk",
+            "id":123
          },
          {
             "amount":35.02745118438233,
@@ -113,7 +117,8 @@ API endpoints can be accessed on the `https://server.duinocoin.com/<endpoint>` U
             "hash":"fae931de744612e3624d5d77250b82b0c3f115f3",
             "memo":"Kolka ban",
             "recipient":"giveaways",
-            "sender":"1crtsk"
+            "sender":"1crtsk",
+            "id":48027
          }
       ],
       "2002020":[
@@ -123,7 +128,8 @@ API endpoints can be accessed on the `https://server.duinocoin.com/<endpoint>` U
             "hash":"5444522a1e0cdec623624d3dfcee68dd2114d91f",
             "memo":"None",
             "recipient":"revox",
-            "sender":"2002020"
+            "sender":"2002020",
+            "id":50505
          }
       ]
      }, 
@@ -142,9 +148,10 @@ API endpoints can be accessed on the `https://server.duinocoin.com/<endpoint>` U
         "amount": 5,
         "datetime": "18/04/2021 09:27:16",
         "hash": "b11019a12589831ccab2447bb69b08de51206693",
-        "memo": "-",
+        "memo": "None"
         "recipient": "ATAR4XY",
-        "sender": "revox"
+        "sender": "revox",
+        "id": 1001
       }
   }
   ```
