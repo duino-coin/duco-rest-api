@@ -8,39 +8,7 @@ Duino-Coin Team & Community 2019-2021
 
 import gevent.monkey
 gevent.monkey.patch_all()
-
-from dotenv import load_dotenv
-import functools
-from flask_caching import Cache
-from flask import Flask, request, jsonify, render_template
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
-from flask_ipban import IpBan
-from socket import socket
-import json
-import random
-import requests
-from bitcash import Key
-from cashaddress import convert
-from tronapi import Tron
-from tronapi import HttpProvider
-from nano_lib_rvx import Account
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-import ssl
-import smtplib
-from colorama import Back, Fore, Style, init
-from re import sub, match
-from time import sleep, time
-from sqlite3 import connect as sqlconn
-from bcrypt import hashpw, gensalt, checkpw
-from json import load
-import os
-import traceback
-import threading
-from hashlib import sha1
-from xxhash import xxh64
-from fastrand import pcg32bounded as fastrandint
+from wrapped_duco_functions import *
 from Server import (
     now, SAVE_TIME, POOL_DATABASE, CONFIG_WHITELIST_USR,
     jail, global_last_block_hash, HOSTNAME,
@@ -52,7 +20,38 @@ from Server import (
     DECIMALS, CONFIG_BANS, protocol_verified_mail,
     CONFIG_JAIL, CONFIG_WHITELIST, perm_ban,
     NodeS_Overide, CAPTCHA_SECRET_KEY)
-from wrapped_duco_functions import *
+from fastrand import pcg32bounded as fastrandint
+from xxhash import xxh64
+from hashlib import sha1
+import threading
+import traceback
+import os
+from json import load
+from bcrypt import hashpw, gensalt, checkpw
+from sqlite3 import connect as sqlconn
+from time import sleep, time
+from re import sub, match
+from colorama import Back, Fore, Style, init
+import smtplib
+import ssl
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from nano_lib_rvx import Account
+from tronapi import HttpProvider
+from tronapi import Tron
+from cashaddress import convert
+from bitcash import Key
+import requests
+import random
+import json
+from socket import socket
+from flask_ipban import IpBan
+from flask_limiter.util import get_remote_address
+from flask_limiter import Limiter
+from flask import Flask, request, jsonify, render_template
+from flask_caching import Cache
+import functools
+from dotenv import load_dotenv
 
 
 def forwarded_ip_check():
@@ -114,15 +113,14 @@ overrides = [
 
 config = {
     "DEBUG": False,
-    # "CACHE_TYPE": "SimpleCache",
     "CACHE_TYPE": "redis",
     "CACHE_REDIS_URL": "redis://localhost:6379/0",
     "CACHE_DEFAULT_TIMEOUT": SAVE_TIME,
-    # "JSONIFY_PRETTYPRINT_REGULAR": True,}
+    "JSONIFY_PRETTYPRINT_REGULAR": False}
 
 limiter = Limiter(
     key_func=forwarded_ip_check,
-    default_limits=["10000 per day", "1 per 2 second"],)
+    default_limits=["5000 per day", "1 per 1 second"],)
 
 ip_ban = IpBan(
     ban_seconds=60*60,
@@ -156,7 +154,7 @@ trx_key.default_address = exchange_address["trx"]
 
 last_transactions_update, last_miners_update, last_balances_update = 0, 0, 0
 miners, balances, transactions = [], [], []
-rate_count, cached_logins, last_transfer, checked_ips = {}, {}, {}, {}
+rate_count, last_transfer, checked_ips = {}, {}, {}
 banlist, jailedusr, registrations, whitelisted_usr = [], [], [], []
 
 with open('config/sell_email.html', 'r') as file:
@@ -212,7 +210,10 @@ def error_log(message: str):
     with open('exchange_erorrs.txt', 'a') as file:
         file.write(str(message))
 
+
 observations = {}
+
+
 @app.errorhandler(429)
 def error429(e):
     global observations
@@ -274,55 +275,35 @@ def error403(e):
 
 
 def login(username: str, unhashed_pass: str):
-    global cached_logins
-
     if not match(r"^[A-Za-z0-9_-]*$", username):
         return (False, "Incorrect username")
 
-    if username in cached_logins:
-        if cached_logins[username] == "#NO_USER":
-            return (False, "No user found from cache")
-        elif cached_logins[username] == unhashed_pass:
-            return (True, "Logged in")
-        elif username == "revox":
-            return (False, "Nice try")
+    try:
+        with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
+            datab = conn.cursor()
+            datab.execute(
+                """SELECT *
+                    FROM Users
+                    WHERE username = ?""",
+                (str(username),))
+            data = datab.fetchone()
+
+        if len(data) > 1:
+            stored_password = data[1]
         else:
-            return (False, "Invalid password")
-    else:
+            return (False, "No user found")
+
         try:
-            with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
-                datab = conn.cursor()
-                datab.execute(
-                    """SELECT *
-                        FROM Users
-                        WHERE username = ?""",
-                    (str(username),))
-                data = datab.fetchone()
+            if checkpw(unhashed_pass, stored_password):
+                return (True, "Logged in")
+            return (False, "Invalid password")
 
-            if data:
-                stored_password = data[1]
-            else:
-                return (False, "No user found")
-
-            try:
-                if checkpw(unhashed_pass, stored_password):
-                    cached_logins[username] = unhashed_pass
-                    return (True, "Logged in")
-                elif username == "revox":
-                    return (False, "Nice try")
-                else:
-                    return (False, "Invalid password")
-
-            except Exception:
-                if checkpw(unhashed_pass, stored_password.encode('utf-8')):
-                    cached_logins[username] = unhashed_pass
-                    return (True, "Logged in")
-                elif username == "revox":
-                    return (False, "Nice try")
-                else:
-                    return (False, "Invalid password")
-        except Exception as e:
-            return (False, "DB Err: " + str(e))
+        except Exception:
+            if checkpw(unhashed_pass, stored_password.encode('utf-8')):
+                return (True, "Logged in")
+            return (False, "Invalid password")
+    except Exception as e:
+        return (False, "DB Err: " + str(e))
 
 
 def check_ip(ip):
@@ -371,13 +352,6 @@ def ip_addr_ban(ip, show=True, perm=False):
         if show:
             dbg(">>> Ip addr banning", ip)
             perm_ban(ip)
-    # sleep(5)
-    # if not ip in whitelist:
-    #    if show:
-    #        dbg(">>> Ip addr banning", ip)
-    #    os.system(f"sudo iptables -A INPUT -s {ip} -j REJECT >/dev/null 2>&1")
-    #    if not perm:
-    #        os.system(f"echo \"sudo iptables -D INPUT -s {ip} -j REJECT\" | at now +45 minutes -M >/dev/null 2>&1")
 
 
 def _success(result, code=200):
@@ -395,12 +369,13 @@ def _proxy():
     threading.Thread(target=ip_addr_ban, args=[ip_addr, False, True]).start()
     return _error("You're using a proxy or VPN")
 
+
 def get_all_transactions():
     global transactions
     global last_transactions_update
 
-    if time() - last_transactions_update > SAVE_TIME*1.5:
-        #print(f'fetching transactions from {CONFIG_TRANSACTIONS}')
+    if time() - last_transactions_update > SAVE_TIME:
+        # print(f'fetching transactions from {CONFIG_TRANSACTIONS}')
         try:
             with sqlconn(CONFIG_TRANSACTIONS, timeout=DB_TIMEOUT) as conn:
                 datab = conn.cursor()
@@ -429,37 +404,51 @@ def row_to_transaction(row):
     }
 
 
-def get_transactions(username: str, limit=10):
-    # transactions for user
-    user_transactions = []
-    for transaction in get_all_transactions():
-        if (transactions[transaction]["sender"] == username
-                or transactions[transaction]["recipient"] == username):
-            user_transactions.append(transactions[transaction])
+def get_transactions(username: str, limit=10, reverse=True):
+    try:
+        order = "DESC"
+        if reverse:
+            order = "ASC"
 
-    return user_transactions[-limit:]
+        with sqlconn(CONFIG_TRANSACTIONS, timeout=DB_TIMEOUT) as conn:
+            datab = conn.cursor()
+            datab.execute("""
+                SELECT * FROM ( 
+                    SELECT * FROM Transactions
+                    WHERE username = ?
+                    OR recipient = ?
+                    ORDER BY id DESC
+                    LIMIT ?
+                ) ORDER BY id """ + order,
+                          (username, username, limit, ))
+            rows = datab.fetchall()
+
+        if len(rows) < 1:
+            raise Exception("No transactions yet or this user doesn't exist")
+
+        return [row_to_transaction(row) for row in rows]
+    except Exception as e:
+        return str(e)
+
 
 def get_all_miners():
     global last_miners_update
     global miners
 
-    if time() - last_miners_update > SAVE_TIME*1.5:
+    if time() - last_miners_update > SAVE_TIME:
         try:
-            #print(f'fetching miners from {CONFIG_MINERAPI}')
+            # print(f'fetching miners from {CONFIG_MINERAPI}')
             with sqlconn(CONFIG_MINERAPI, timeout=DB_TIMEOUT) as conn:
                 datab = conn.cursor()
                 datab.execute("SELECT * FROM Miners")
                 rows = datab.fetchall()
 
-            miners_cp = {}
-            for row in rows:
-                if not row[1] in miners_cp:
-                    miners_cp[row[1]] = []
-                miners_cp[row[1]].append(row_to_miner(row))
-
-            miners = dict(
-                sorted(miners_cp.items(), key=lambda item: item[0]))
             last_miners_update = time()
+            miners = {}
+            for row in rows:
+                if not row[1] in miners:
+                    miners[row[1]] = []
+                miners[row[1]].append(row_to_miner(row))
         except Exception as e:
             print(traceback.format_exc())
 
@@ -484,12 +473,21 @@ def row_to_miner(row):
 
 
 def get_miners(username: str):
-    # For /users/
-    return get_all_miners()[username]
+    with sqlconn(CONFIG_MINERAPI, timeout=DB_TIMEOUT) as conn:
+        datab = conn.cursor()
+        datab.execute("SELECT * FROM Miners WHERE username = ?", (username, ))
+        rows = datab.fetchall()
+
+    if len(rows) < 1:
+        raise Exception("No miners detected")
+
+    rows.sort(key=lambda tup: tup[1])
+    return [row_to_miner(row) for row in rows]
 
 
 trusted = {}
 creation = {}
+
 
 def get_all_balances():
     global balances
@@ -500,7 +498,7 @@ def get_all_balances():
 
     if time() - last_balances_update > SAVE_TIME:
         try:
-            #print(f'fetching balances from {DATABASE}')
+            # print(f'fetching balances from {DATABASE}')
             with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
                 datab = conn.cursor()
                 datab.execute("SELECT * FROM Users")
@@ -526,15 +524,41 @@ def row_to_balance(row):
     }
 
 
-def get_balance(username: str):
-    balances = get_all_balances()
-    balance = {
+def get_user_data(username: str):
+    with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
+        datab = conn.cursor()
+        datab.execute("""
+            SELECT * 
+            FROM Users 
+            WHERE username = ?""",
+            (username, ))
+        row = datab.fetchone()
+
+    if len(row) < 1:
+        raise Exception("This user doesn't exist")
+
+    return {
         "username": username,
-        "balance": balances[username],
-        "verified": trusted[username],
-        "created": creation[username]
+        "balance": round(row[3], DECIMALS),
+        "verified": row[5].lower(),
+        "created": row[4].lower()
     }
-    return balance
+
+
+def is_verified(username: str):
+    with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
+        datab = conn.cursor()
+        datab.execute("""
+            SELECT * 
+            FROM Users 
+            WHERE username = ?""",
+                      (username, ))
+        row = datab.fetchone()
+
+    if len(row) < 1:
+        return "no"
+
+    return row[5].lower()
 
 
 @app.route("/ping")
@@ -691,7 +715,7 @@ def register():
     if ip_feed[0]:
         return _error(ip_feed[1])
 
-    altcheck = alt_check(ip_addr, username)
+    altcheck = alt_check(ip_addr, username, False)
     if altcheck[0]:
         return _error(
             f"You are already registered as {altcheck[1]}, why do you need another account?")
@@ -752,7 +776,7 @@ def register():
 def get_miners_api(username: str):
     # Get all miners
     try:
-        return _success(get_all_miners()[username])
+        return _success(get_miners(username))
     except:
         return _error("No miners detected on that account")
 
@@ -763,8 +787,8 @@ def api_wrap_duco(username: str):
     try:
         ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
         unhashed_pass = request.args.get('password', None).encode("utf-8")
-        amount = int(request.args.get('amount', None))
-        tron_address = str(request.args.get('address', None))
+        amount = float(sub(r'[+-]?([0-9]*[.])?[0-9]+', '', request.args.get('amount', None)))
+        tron_address = sub(r'^[A-Za-z0-9_-]*$', '', str(request.args.get('address', None)))
     except Exception as e:
         return _error(f"Invalid data: {e}")
 
@@ -798,7 +822,7 @@ def api_wrap_duco(username: str):
 def api_get_user_objects(username: str):
     try:
         try:
-            limit = int(request.args.get('limit', None))
+            limit = int(sub(r'[+-]?([0-9]*[.])?[0-9]+', '', request.args.get('limit', None)))
         except:
             limit = 5
         ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
@@ -808,7 +832,7 @@ def api_get_user_objects(username: str):
     # dbg("/GET/users/"+str(username))
 
     try:
-        balance = get_balance(username)
+        balance = get_user_data(username)
     except:
         return _error("This user doesn't exist")
 
@@ -829,6 +853,12 @@ def api_get_user_objects(username: str):
     }
 
     return _success(result)
+
+
+@app.route("/users/")
+@cache.cached(timeout=60)
+def user_error():
+    return _error("Usage: /users/<username>")
 
 
 @app.route("/changepass/<username>")
@@ -894,7 +924,7 @@ def api_verify(username: str):
     if not pwd in overrides:
         return _error("Invalid password!!!")
 
-    if trusted[username].lower() == "yes":
+    if is_verified(username) == "yes":
         return _error("This user is already verified :P")
 
     try:
@@ -923,7 +953,7 @@ def api_verify(username: str):
 def get_transaction_by_username(username: str):
     dbg("/GET/user_transactions/"+str(username))
     try:
-        limit = int(request.args.get('limit', 10))
+        limit = int(sub(r'^[0-9]*$', '', request.args.get('limit', 5)))
     except Exception as e:
         return _error(f"Invalid data: {e}")
 
@@ -934,17 +964,30 @@ def get_transaction_by_username(username: str):
         return _error(f"Error: {e}")
 
 
-@app.route("/id_transactions/<id>")
+@app.route("/id_transactions/<tx_id>")
 @cache.cached(timeout=SAVE_TIME)
-def get_transaction_by_id(id: int):
-    dbg("/GET/id_transactions/"+str(id))
+def get_transaction_by_id(tx_id: str):
+    # dbg("/GET/id_transactions/"+str(tx_id))
     try:
-        for transaction in get_all_transactions():
-            if int(transactions[transaction]["id"]) == int(id):
-                return _success(transactions[transaction])
-        return _error("No transaction found")
+        return _success(api_tx_by_id(tx_id))
     except Exception as e:
         return _error("No transaction found")
+
+
+def api_tx_by_id(tx_id: str):
+    with sqlconn(CONFIG_TRANSACTIONS, timeout=DB_TIMEOUT) as conn:
+        datab = conn.cursor()
+        datab.execute("""
+            SELECT * 
+            FROM Transactions 
+            WHERE id = ?""",
+                      (tx_id, ))
+        row = datab.fetchone()
+
+    if len(row) < 1:
+        raise Exception("No transaction found")
+
+    return row_to_transaction(row)
 
 
 @app.route("/transactions/<hash>")
@@ -952,12 +995,25 @@ def get_transaction_by_id(id: int):
 def get_transaction_by_hash(hash: str):
     # dbg("/GET/transactions/"+str(hash))
     try:
-        for transaction in get_all_transactions():
-            if transactions[transaction]["hash"] == hash:
-                return _success(transactions[transaction])
-        return _error("No transaction found")
+        return _success(api_tx_by_hash(hash))
     except Exception as e:
         return _error("No transaction found")
+
+
+def api_tx_by_hash(hash: str):
+    with sqlconn(CONFIG_TRANSACTIONS, timeout=DB_TIMEOUT) as conn:
+        datab = conn.cursor()
+        datab.execute("""
+            SELECT * 
+            FROM Transactions 
+            WHERE hash = ?""",
+                      (hash, ))
+        row = datab.fetchone()
+
+    if len(row) < 1:
+        raise Exception("No transaction found")
+
+    return row_to_transaction(row)
 
 
 @app.route("/balances/<username>")
@@ -965,7 +1021,7 @@ def get_transaction_by_hash(hash: str):
 def api_get_user_balance(username: str):
     # dbg("/GET/balances/"+str(username))
     try:
-        return _success(get_balance(username))
+        return _success(get_user_data(username))
     except Exception as e:
         return _error("This user doesn't exist")
 
@@ -991,17 +1047,17 @@ def api_get_all_transactions():
 
 
 @app.route("/miners")
-@cache.cached(timeout=SAVE_TIME)
+@cache.cached(timeout=SAVE_TIME*3)
 def api_get_all_miners():
     dbg("/GET/miners")
     try:
-        return _success(miners)
+        return _success(get_all_miners())
     except Exception as e:
         return _error("Error fetching miners: " + str(e))
 
 
 @app.route("/statistics")
-@cache.cached(timeout=SAVE_TIME*2)
+@cache.cached(timeout=SAVE_TIME*3)
 def get_api_data():
     # dbg("/GET/statistics")
     data = {}
@@ -1015,32 +1071,28 @@ def get_api_data():
 
 
 @app.route("/ip")
-@cache.cached(timeout=SAVE_TIME)
 def get_ip():
     dbg("/GET/ip")
     ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
     return _success(ip_addr)
 
 
+def user_to_stats(user):
+    return {
+        "w": len(miners[user]),
+        "v": trusted(user)
+    }
+
+
 @app.route("/statistics_miners")
-@cache.cached(timeout=SAVE_TIME*2)
+@cache.cached(timeout=SAVE_TIME*3)
 def get_api_data_miners():
     dbg("/GET/statistics_miners")
-    data = {}
+    get_all_balances()
+    get_all_miners()
+
     try:
-        all_workers = miners
-        for user in all_workers:
-            try:
-                v = trusted[user]
-            except Exception:
-                v = "no"
-
-            data[user] = {
-                "w": len(all_workers[user]),
-                "v": v
-            }
-
-        return _success(data)
+        return _success([user_to_stats(user) for user in miners])
     except Exception as e:
         return _error(str(e))
 
@@ -1049,13 +1101,13 @@ def get_api_data_miners():
 @limiter.limit("2 per 1 day")
 def exchange_request():
     try:
-        username = str(request.args.get('username', None))
+        username = sub(r'^[A-Za-z0-9_-]*$', '', str(request.args.get('username', None)))
         unhashed_pass = request.args.get('password', None).encode('utf-8')
-        email = str(request.args.get('email', None))
-        ex_type = str(request.args.get('type', None)).upper()
-        amount = int(request.args.get('amount', None))
-        coin = str(request.args.get('coin', None)).lower()
-        address = str(request.args.get('address', None))
+        email = str(sub(r'/^\S+@\S+\.\S+$/', '', request.args.get('email', None)))
+        ex_type = sub(r'^[A-Za-z0-9_-]*$', '', str(request.args.get('type', None))).upper()
+        amount = int(sub(r'[+-]?([0-9]*[.])?[0-9]+', '', request.args.get('amount', None)))
+        coin = sub(r'^[A-Za-z0-9_-]*$', '', str(request.args.get('coin', None))).lower()
+        address = sub(r'^[A-Za-z0-9_-]*$', '', str(request.args.get('address', None)))
         ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
     except Exception as e:
         return _error(f"Invalid data: {e}")
@@ -1068,7 +1120,7 @@ def exchange_request():
     if ip_feed[0]:
         return _error(ip_feed[1])
 
-    if trusted[username].lower() != "yes":
+    if is_verified(username) != "yes":
         return _error("Your account is not verified, see https://server.duinocoin.com/verify.html")
 
     if username in banlist or username in jailedusr:
@@ -1121,12 +1173,12 @@ def exchange_request():
         return _error("Maximum exchangeable amount is 10000 DUCO")
 
     if ex_type.upper() == "SELL":
-        balance = get_balance(username)["balance"]
+        balance = get_user_data(username)["balance"]
         if amount > balance:
             return _error("You don't have enough DUCO in your account ("
                           + str(round(balance, 3))+")")
     else:
-        exchange_balance = get_balance(exchange_address["duco"])["balance"]
+        exchange_balance = get_user_data(exchange_address["duco"])["balance"]
         if amount > exchange_balance:
             return _error("We don't have enough DUCO in our reserves ("
                           + str(round(exchange_balance, 3))+"). "
@@ -1190,8 +1242,11 @@ def exchange_request():
                     + f"?username=revox&recipient={address}"
                     + f"&password={DUCO_PASS}&amount={exchanged_amount}"
                     + f"&memo=DUCO Exchange payment").json()
-                coin_txid = coin_txid["result"].split(",")[2]
-                dbg("EX: Sent XMG", coin_txid)
+                if "result" in coin_txid:
+                    coin_txid = coin_txid["result"].split(",")[2]
+                    dbg("EX: Sent XMG", coin_txid)
+                except:
+                    raise Exception(coin_txid["message"])
             except Exception as e:
                 print("EX: Error sending XMG", traceback.format_exc())
                 error_log(
@@ -1487,11 +1542,11 @@ def api_transaction():
     global rate_count
     # return _error("Temporarily disabled")
     try:
-        username = str(request.args.get('username', None))
+        username = sub(r'^[A-Za-z0-9_-]*$', '', str(request.args.get('username', None)))
         unhashed_pass = str(request.args.get('password', None)).encode('utf-8')
-        recipient = str(request.args.get('recipient', None))
-        amount = float(request.args.get('amount', None))
-        memo = str(request.args.get('memo', None))
+        recipient = sub(r'^[A-Za-z0-9_-]*$+', '', str(request.args.get('recipient', None)))
+        amount = float(sub(r'^[0-9]*$', '', request.args.get('amount', None)))
+        memo = sub(r'[^A-Za-z0-9 .()-:/!#_+-]+', ' ', str(request.args.get('memo', None)))
         ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
     except Exception as e:
         return _error(f"Invalid data: {e}")
@@ -1505,19 +1560,10 @@ def api_transaction():
     if ip_feed[0]:
         return _error(ip_feed[1])
 
-    # return _error("Sending funds is temporarily disabled")
-
-    if not match(r"^[A-Za-z0-9_-]*$", username):
-        return _error("Incorrect username")
-
-    if not match(r"^[A-Za-z0-9_-]*$", recipient):
-        return _error("Incorrect username")
-
-    memo = sub(r'[^A-Za-z0-9 .()-:/!#_+-]+', ' ', str(memo))
     if len(str(memo)) > 256:
         memo = str(memo[0:253]) + "..."
 
-    if trusted[username].lower() == "no":
+    if is_verified(username) == "no":
         return _error("NO,Verify your account first")
 
     if username in jail:
@@ -1736,7 +1782,7 @@ def api_sync_proxy():
             return _error(sync_state)
         s.close()
 
-        #dbg(f"Success: {loginInfos['name']} synced")
+        # dbg(f"Success: {loginInfos['name']} synced")
         return _success(sync_state)
 
     except Exception as e:
