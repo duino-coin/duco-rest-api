@@ -2,7 +2,7 @@
 """
 Duino-Coin REST API © MIT licensed
 https://duinocoin.com
-https://github.com/revoxhere/duino-coin-rest-api
+https://github.com/revoxhere/duco-rest-api
 Duino-Coin Team & Community 2019-2021
 """
 
@@ -12,7 +12,7 @@ from wrapped_duco_functions import *
 from Server import (
     now, SAVE_TIME, POOL_DATABASE, CONFIG_WHITELIST_USR,
     jail, global_last_block_hash, HOSTNAME,
-    DATABASE, DUCO_EMAIL, DUCO_PASS, alt_check,
+    DATABASE, DUCO_EMAIL, DUCO_PASS, alt_check, acc_check,
     DB_TIMEOUT, CONFIG_MINERAPI, SERVER_VER,
     CONFIG_TRANSACTIONS, API_JSON_URI,
     BCRYPT_ROUNDS, user_exists, SOCKET_TIMEOUT,
@@ -258,6 +258,7 @@ def error500(e):
 def error403(e):
     ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
     ip_ban.add(ip=ip_addr)
+    ip_ban.block(ip_addr)
 
     dbg("Error 403", ip_addr)
 
@@ -351,6 +352,7 @@ def ip_addr_ban(ip, show=True, perm=False):
     if not ip in whitelist:
         if show:
             dbg(">>> Ip addr banning", ip)
+            ip_ban.block(ip)
             perm_ban(ip)
 
 
@@ -374,7 +376,7 @@ def get_all_transactions():
     global transactions
     global last_transactions_update
 
-    if time() - last_transactions_update > SAVE_TIME:
+    if time() - last_transactions_update > SAVE_TIME*3:
         # print(f'fetching transactions from {CONFIG_TRANSACTIONS}')
         try:
             with sqlconn(CONFIG_TRANSACTIONS, timeout=DB_TIMEOUT) as conn:
@@ -420,11 +422,8 @@ def get_transactions(username: str, limit=10, reverse=True):
                     ORDER BY id DESC
                     LIMIT ?
                 ) ORDER BY id """ + order,
-                          (username, username, limit, ))
+                          (username, username, limit))
             rows = datab.fetchall()
-
-        if len(rows) < 1:
-            raise Exception("No transactions yet or this user doesn't exist")
 
         return [row_to_transaction(row) for row in rows]
     except Exception as e:
@@ -435,7 +434,7 @@ def get_all_miners():
     global last_miners_update
     global miners
 
-    if time() - last_miners_update > SAVE_TIME:
+    if time() - last_miners_update > SAVE_TIME*3:
         try:
             # print(f'fetching miners from {CONFIG_MINERAPI}')
             with sqlconn(CONFIG_MINERAPI, timeout=DB_TIMEOUT) as conn:
@@ -496,7 +495,7 @@ def get_all_balances():
     global trusted
     global creation
 
-    if time() - last_balances_update > SAVE_TIME:
+    if time() - last_balances_update > SAVE_TIME*3:
         try:
             # print(f'fetching balances from {DATABASE}')
             with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
@@ -517,13 +516,6 @@ def get_all_balances():
     return balances
 
 
-def row_to_balance(row):
-    return {
-        'username': str(row[0]),
-        'balance': float(row[3])
-    }
-
-
 def get_user_data(username: str):
     with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
         datab = conn.cursor()
@@ -534,8 +526,8 @@ def get_user_data(username: str):
             (username, ))
         row = datab.fetchone()
 
-    if len(row) < 1:
-        raise Exception("This user doesn't exist")
+    if not row:
+        raise Exception("User not found")
 
     return {
         "username": username,
@@ -787,8 +779,8 @@ def api_wrap_duco(username: str):
     try:
         ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
         unhashed_pass = request.args.get('password', None).encode("utf-8")
-        amount = float(sub(r'[+-]?([0-9]*[.])?[0-9]+', '', request.args.get('amount', None)))
-        tron_address = sub(r'^[A-Za-z0-9_-]*$', '', str(request.args.get('address', None)))
+        amount = float(request.args.get('amount', None))
+        tron_address = str(request.args.get('address', None))
     except Exception as e:
         return _error(f"Invalid data: {e}")
 
@@ -804,9 +796,10 @@ def api_wrap_duco(username: str):
     if username in jail or username in banlist:
         return _error("User can not wrap DUCO")
 
-    altfeed = alt_check(ip_addr, username)
+    altfeed = alt_check(ip_addr, username, True, False)
     if altfeed[0]:
-        return _error(f"You're using alt-account(s): {altfeed[1]}")
+        if not username in altfeed[1][:2]: # Filter first two accounts
+            return _error(f"You're using alt-account(s): {altfeed[1][2]}")
 
     wrapfeedback = protocol_wrap_wduco(username, tron_address, amount)
     wrapfeedback = wrapfeedback.replace("NO,", "").replace("OK,", "")
@@ -822,7 +815,7 @@ def api_wrap_duco(username: str):
 def api_get_user_objects(username: str):
     try:
         try:
-            limit = int(sub(r'[+-]?([0-9]*[.])?[0-9]+', '', request.args.get('limit', None)))
+            limit = int(request.args.get('limit', None))
         except:
             limit = 5
         ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
@@ -833,8 +826,8 @@ def api_get_user_objects(username: str):
 
     try:
         balance = get_user_data(username)
-    except:
-        return _error("This user doesn't exist")
+    except Exception as e:
+        return _error(f"This user doesn't exist: {e}")
 
     try:
         miners = get_miners(username)
@@ -953,7 +946,7 @@ def api_verify(username: str):
 def get_transaction_by_username(username: str):
     dbg("/GET/user_transactions/"+str(username))
     try:
-        limit = int(sub(r'^[0-9]*$', '', request.args.get('limit', 5)))
+        limit = int(request.args.get('limit', 5))
     except Exception as e:
         return _error(f"Invalid data: {e}")
 
@@ -984,7 +977,7 @@ def api_tx_by_id(tx_id: str):
                       (tx_id, ))
         row = datab.fetchone()
 
-    if len(row) < 1:
+    if not row:
         raise Exception("No transaction found")
 
     return row_to_transaction(row)
@@ -1010,7 +1003,7 @@ def api_tx_by_hash(hash: str):
                       (hash, ))
         row = datab.fetchone()
 
-    if len(row) < 1:
+    if not row:
         raise Exception("No transaction found")
 
     return row_to_transaction(row)
@@ -1027,7 +1020,7 @@ def api_get_user_balance(username: str):
 
 
 @app.route("/balances")
-@cache.cached(timeout=SAVE_TIME)
+@cache.cached(timeout=SAVE_TIME*3)
 def api_get_all_balances():
     dbg("/GET/balances")
     try:
@@ -1037,7 +1030,7 @@ def api_get_all_balances():
 
 
 @app.route("/transactions")
-@cache.cached(timeout=SAVE_TIME)
+@cache.cached(timeout=SAVE_TIME*3)
 def api_get_all_transactions():
     dbg("/GET/transactions")
     try:
@@ -1077,22 +1070,22 @@ def get_ip():
     return _success(ip_addr)
 
 
-def user_to_stats(user):
-    return {
-        "w": len(miners[user]),
-        "v": trusted(user)
-    }
-
-
 @app.route("/statistics_miners")
 @cache.cached(timeout=SAVE_TIME*3)
 def get_api_data_miners():
     dbg("/GET/statistics_miners")
+    all_miners = get_all_miners()
     get_all_balances()
-    get_all_miners()
-
     try:
-        return _success([user_to_stats(user) for user in miners])
+        to_return = {}
+        for user in all_miners:
+            try:
+                to_return[user] = {
+                    "w": len(all_miners[user]),
+                    "v": trusted[user]}
+            except:
+                continue
+        return _success(to_return)
     except Exception as e:
         return _error(str(e))
 
@@ -1101,13 +1094,13 @@ def get_api_data_miners():
 @limiter.limit("2 per 1 day")
 def exchange_request():
     try:
-        username = sub(r'^[A-Za-z0-9_-]*$', '', str(request.args.get('username', None)))
+        username = str(request.args.get('username', None))
         unhashed_pass = request.args.get('password', None).encode('utf-8')
-        email = str(sub(r'/^\S+@\S+\.\S+$/', '', request.args.get('email', None)))
-        ex_type = sub(r'^[A-Za-z0-9_-]*$', '', str(request.args.get('type', None))).upper()
-        amount = int(sub(r'[+-]?([0-9]*[.])?[0-9]+', '', request.args.get('amount', None)))
-        coin = sub(r'^[A-Za-z0-9_-]*$', '', str(request.args.get('coin', None))).lower()
-        address = sub(r'^[A-Za-z0-9_-]*$', '', str(request.args.get('address', None)))
+        email = str(request.args.get('email', None))
+        ex_type = str(request.args.get('type', None)).upper()
+        amount = int(request.args.get('amount', None))
+        coin = str(request.args.get('coin', None)).lower()
+        address = str(request.args.get('address', None))
         ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
     except Exception as e:
         return _error(f"Invalid data: {e}")
@@ -1161,10 +1154,10 @@ def exchange_request():
     except Exception as e:
         return _error("No user found: " + str(e))
 
-    altcheck = alt_check(ip_addr, username)
-    if altcheck[0]:
-        jail.append(username)
-        return _error(f"NO,You're using alt-account(s): {altcheck[1]}")
+    altfeed = alt_check(ip_addr, username, True, False)
+    if altfeed[0]:
+        if not username in altfeed[1][:2]: # Filter first two accounts
+            return _error(f"You're using alt-account(s): {altfeed[1][2]}")
 
     # Check the amount
     if amount < 200:
@@ -1245,7 +1238,7 @@ def exchange_request():
                 if "result" in coin_txid:
                     coin_txid = coin_txid["result"].split(",")[2]
                     dbg("EX: Sent XMG", coin_txid)
-                except:
+                else:
                     raise Exception(coin_txid["message"])
             except Exception as e:
                 print("EX: Error sending XMG", traceback.format_exc())
@@ -1542,14 +1535,15 @@ def api_transaction():
     global rate_count
     # return _error("Temporarily disabled")
     try:
-        username = sub(r'^[A-Za-z0-9_-]*$', '', str(request.args.get('username', None)))
+        username = str(request.args.get('username', None))
         unhashed_pass = str(request.args.get('password', None)).encode('utf-8')
-        recipient = sub(r'^[A-Za-z0-9_-]*$+', '', str(request.args.get('recipient', None)))
-        amount = float(sub(r'^[0-9]*$', '', request.args.get('amount', None)))
+        recipient = str(request.args.get('recipient', None))
+        amount = float(request.args.get('amount', None))
         memo = sub(r'[^A-Za-z0-9 .()-:/!#_+-]+', ' ', str(request.args.get('memo', None)))
         ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
     except Exception as e:
-        return _error(f"Invalid data: {e}")
+        print(e)
+        return _error(f"NO,Invalid data: {e}")
 
     dbg(f"New TX request: {username}",
         f"\n\t amount: {amount}",
@@ -1560,8 +1554,23 @@ def api_transaction():
     if ip_feed[0]:
         return _error(ip_feed[1])
 
+    #return _error("Temporarily disabled")
+
+    chain_accounts = ["bscDUCO", "celoDUCO", "maticDUCO"]
+    if recipient in chain_accounts:
+        acccheck = acc_check(memo, username)
+        if acccheck[0]:
+            jail.append(username)
+            return _error(f"NO,This address is associated with another account(s): {acccheck[1]}")
+
     if len(str(memo)) > 256:
         memo = str(memo[0:253]) + "..."
+
+    if not match(r"^[A-Za-z0-9_-]*$", username):
+        return _error("NO,Incorrect username")
+
+    if not match(r"^[A-Za-z0-9_-]*$", recipient):
+        return _error("NO,Incorrect recipient")
 
     if is_verified(username) == "no":
         return _error("NO,Verify your account first")
@@ -1632,10 +1641,10 @@ def api_transaction():
         else:
             memo = "OVERRIDE"
 
-    altcheck = alt_check(ip_addr, username)
-    if altcheck[0]:
-        jail.append(username)
-        return _error(f"NO,You're using alt-account(s): {altcheck[1]}")
+    altfeed = alt_check(ip_addr, username, True, False)
+    if altfeed[0]:
+        if not username in altfeed[1][:2]: # Filter first two accounts
+            return _error(f"NO,You're using alt-account(s): {altfeed[1][2]}")
 
     try:
         import random
@@ -1752,10 +1761,10 @@ def api_sync_proxy():
         return _error(f"Invalid data: {e}")
 
     try:
-        s.settimeout(90)
+        s.settimeout(10)
         port = random.choice([2810, 2809, 2808, 2807, 2806])
         s.connect(("127.0.0.1", port))
-        recv_ver = s.recv(5).decode()
+        recv_ver = s.recv(5).decode().rstrip("\n")
         if not recv_ver:
             dbg(f"Warning: {loginInfos['name']} connection interrupted")
             return _error(f"Connection interrupted")
@@ -1763,8 +1772,8 @@ def api_sync_proxy():
             dbg(f"Warning: {loginInfos['name']} server versions don't match: {2.7}, {recv_ver}")
             return _error(f"Invalid ver: {recv_ver}")
 
-        s.sendall(f"PoolLogin,{json.dumps(loginInfos)}".encode("utf-8"))
-        login_state = s.recv(16).decode()
+        s.sendall(f"PoolLogin,{json.dumps(loginInfos)}\n".encode("utf-8"))
+        login_state = s.recv(16).decode().rstrip("\n")
         if not login_state:
             dbg(f"Warning: {loginInfos['name']} connection interrupted")
             return _error(f"Connection interrupted")
@@ -1772,8 +1781,8 @@ def api_sync_proxy():
             dbg(f"Error: {loginInfos['name']} invalid login state: {login_state}")
             return _error(login_state)
 
-        s.sendall(f"PoolSync,{json.dumps(syncData)}".encode("utf-8"))
-        sync_state = s.recv(16).decode()
+        s.sendall(f"PoolSync,{json.dumps(syncData)}\n".encode("utf-8"))
+        sync_state = s.recv(16).decode().rstrip("\n")
         if not sync_state:
             dbg(f"Warning: {loginInfos['name']} connection interrupted")
             return _error(f"Connection interrupted")
@@ -1786,7 +1795,7 @@ def api_sync_proxy():
         return _success(sync_state)
 
     except Exception as e:
-        if str(e) == "timed out":
+        if str(e) == "timed outZ":
             dbg(f"Error: {loginInfos['name']} timed out")
         else:
             dbg(f"Error: {loginInfos['name']} {e}")
