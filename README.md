@@ -29,7 +29,7 @@ API endpoints can be accessed on the `https://server.duinocoin.com/<endpoint>` U
 
 - User data
   - `/users/<username>` - return username's balance, last transactions and miners in one request [example](#usersusername)
-  - `/auth/<username>/?password=<password>` - check username's password
+  - `/auth/<username>?password=<password>` - check username's password
 
 - Transactions
   - `/transactions` - return **all** transactions [example](#transactions)
