@@ -764,7 +764,7 @@ def getpool():
 
 
 @app.route("/recovering/<username>")
-@limiter.limit("5 per hour")
+@limiter.limit("5 per day")
 def api_recovering(username: str):
     try:
         ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
@@ -842,7 +842,7 @@ def api_recovering(username: str):
         return _error("Username not provided")
 
 @app.route("/recovery/")
-@limiter.limit("5 per hour")
+@limiter.limit("5 per day")
 def api_recovery():
     try:
         ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
