@@ -764,7 +764,7 @@ def getpool():
 
 
 @app.route("/recovering/<username>")
-@limiter.limit("20 per hour")
+@limiter.limit("5 per hour")
 def api_recovering(username: str):
     try:
         ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
@@ -783,18 +783,19 @@ def api_recovering(username: str):
         return _error("Invalid data.")
 
     decoded_hash = str(base64.b64decode(hash)).strip("b").strip("'").strip("'")
-    decoded_hash_split = decoded_hash.split("-")[1].split(":")[0]
+    decoded_hash_split = decoded_hash.split("-")[1].split(":")[1]
 
     decoded_hash_email = decoded_hash.split("=")[1]
 
     Timenow = str(now().strftime('%m/%d/%Y-%H:%M:%S'))
-    Timenow_split = Timenow.split("-")[1].split(":")[0]
+    Timenow_split = Timenow.split("-")[1].split(":")[1]
 
     daysHash = decoded_hash.split("-")[0].split("/")
     daysNow = Timenow.split("-")[0].split("/")
 
-    if daysHash[0] != daysNow[0] or daysHash[1] != daysNow[1] or daysHash[2] != daysNow[2]:
-        return _error("Invalid hash")
+    for i in range(3):
+        if(daysHash[i] != daysNow[i]):
+            return _error("Invalid hash")
 
     try:
         with sqlconn(DATABASE,
@@ -838,7 +839,7 @@ def api_recovering(username: str):
         return _error("Username not provided")
 
 @app.route("/recovery/")
-@limiter.limit("20 per hour")
+@limiter.limit("5 per hour")
 def api_recovery():
     try:
         ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
