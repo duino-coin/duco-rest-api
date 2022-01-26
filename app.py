@@ -863,7 +863,7 @@ def api_recovery():
                     message["From"] = DUCO_EMAIL
                     message["To"] = email
 
-                    hashStr = str((now() + timedelta(hours=0.5)).strftime('%m/%d/%Y-%H:%M:%S')).encode("utf-8")
+                    hashStr = str((now() + timedelta(minutes=30)).strftime('%m/%d/%Y-%H:%M:%S')).encode("utf-8")
 
                     hash = base64.b64encode(hashStr + str("=" + email).encode("utf-8"))
 
