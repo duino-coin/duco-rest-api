@@ -881,7 +881,7 @@ def api_recovery():
                     with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtpserver:
                         smtpserver.login(DUCO_EMAIL, DUCO_PASS)
                         smtpserver.sendmail(DUCO_EMAIL, email, message.as_string())
-                    return jsonify(result="Email successfully sent", url=recoveryUrl, success=True), 200
+                    return jsonify(result="Email successfully sent", success=True), 200
                 except Exception as e:
                     return _error("Error sending email")
             except Exception as e:
