@@ -783,12 +783,12 @@ def api_recovering(username: str):
         return _error("Invalid data.")
 
     decoded_hash = str(base64.b64decode(hash)).strip("b").strip("'").strip("'")
-    decoded_hash_split = decoded_hash.split("-")[1].split(":")[1]
+    decoded_hash_split = decoded_hash.split("-")[1].split(":")
 
     decoded_hash_email = decoded_hash.split("=")[1]
 
     Timenow = str(now().strftime('%m/%d/%Y-%H:%M:%S'))
-    Timenow_split = Timenow.split("-")[1].split(":")[1]
+    Timenow_split = Timenow.split("-")[1].split(":")
 
     daysHash = decoded_hash.split("-")[0].split("/")
     daysNow = Timenow.split("-")[0].split("/")
@@ -813,7 +813,10 @@ def api_recovering(username: str):
         print(e)
         return _error("Invalid hash")
 
-    if decoded_hash_split < Timenow_split:
+    if decoded_hash_split[0] != Timenow_split[0]:
+        return _error("Hash expired")
+
+    if decoded_hash_split[1] < Timenow_split[1]:
         return _error("Hash expired")
 
     if username:
