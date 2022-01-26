@@ -52,6 +52,118 @@ from flask import Flask, request, jsonify, render_template
 from flask_caching import Cache
 import functools
 from dotenv import load_dotenv
+from datetime import timedelta
+import secrets
+import string
+import base64
+
+
+html_recovery_template = """\
+<html lang="en-US">
+
+<head>
+    <style type="text/css">
+        @import url('https://fonts.googleapis.com/css2?family=Barlow:wght@300&display=swap');
+
+        * {
+            font-family: 'Barlow', sans-serif;
+        }
+
+        a:hover {
+            text-decoration: none !important;
+        }
+
+        .btn {
+            background: #4f46e5;
+            text-decoration: none !important;
+            font-weight: semibold;
+            margin-top: 35px;
+            color: #fff !important;
+            text-transform: uppercase;
+            font-size: 14px;
+            padding: 10px 24px;
+            display: inline-block;
+        }
+
+        .btn:hover {
+            background: #6366f1;
+        }
+    </style>
+</head>
+
+<body marginheight="0" topmargin="0" marginwidth="0" style="margin: 0px; background-color: #eef2ff;" leftmargin="0">
+    <table cellspacing="0" border="0" cellpadding="0" width="100%" bgcolor="#eef2ff"">
+        <tr>
+            <td>
+                <table style=" background-color: #ffffff; max-width:670px; margin:0 auto;" width="100%" border="0"
+        align="center" cellpadding="0" cellspacing="0">
+        <tr>
+            <td style="height:80px;">&nbsp;</td>
+        </tr>
+        <tr>
+            <td style="text-align:center;">
+                <a href="https://www.duinocoin.com" title="logo" target="_blank">
+                    <img src="https://github.com/revoxhere/duino-coin/raw/master/Resources/ducobanner.png?raw=true"
+                        width="50%" height="auto">
+                </a>
+            </td>
+        </tr>
+        <tr>
+            <td style="height:20px;">&nbsp;</td>
+        </tr>
+        <tr>
+            <td>
+                <table width="95%" border="0" align="center" cellpadding="0" cellspacing="0"
+                    style="max-width:670px;background:#fff; border-radius:3px; text-align:center; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);">
+                    <tr>
+                        <td style="text-align:center; padding-top: 25px; height:40px; font-size: 32px;">
+                            Hi {username}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding:0 35px; text-align:center;">
+                            <h1
+                                style="color:#1e1e2d; font-weight:500; margin:0; margin-top: 25px; font-size:16px;">
+                                You have
+                                requested to reset your password</h1>
+                            <span
+                                style="display:inline-block; vertical-align:middle; margin:29px 0 26px; border-bottom:1px solid #cecece; width:100px;"></span>
+                            <p style="color:#455056; font-size:15px;line-height:24px; margin:0;">
+                                We cannot simply send you your old password. A unique link to reset your
+                                password has been generated for you. To reset your password, click the
+                                following link and follow the instructions.<br/>
+                                You have 30 minutes to reset your password. 
+                                If you did not request a password reset, please ignore this email.
+                            </p>
+                            <a href="{link}" class="btn">Reset
+                                Password</a>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="height:40px;">&nbsp;</td>
+                    </tr>
+                </table>
+            </td>
+        <tr>
+            <td style="height:20px;">&nbsp;</td>
+        </tr>
+        <tr>
+            <td style="text-align:center;">
+                <p style="font-size:14px; color:rgba(69, 80, 86, 0.7411764705882353); line-height:18px; margin:0 0 0;">
+                    Have a great day, <a href="https://duinocoin.com/team">the Duino-Coin Team</a> 😊</p>
+            </td>
+        </tr>
+        <tr>
+            <td style="height:80px;">&nbsp;</td>
+        </tr>
+    </table>
+    </td>
+    </tr>
+    </table>
+</body>
+
+</html>
+"""
 
 
 def forwarded_ip_check():
@@ -649,6 +761,131 @@ def getpool():
             "success": True})
     except Exception as e:
         return _error(str(e))
+
+
+@app.route("/recovering/<username>")
+@limiter.limit("20 per hour")
+def api_recovering(username: str):
+    try:
+        ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
+        hash = str(request.args.get('hash'))
+    except Exception as e:
+        return _error(f"Invalid data: {e}")
+
+    ip_feed = check_ip(ip_addr)
+    if ip_feed[0]:
+        return _error(ip_feed[1])
+
+    if hash == "None" or hash == '':
+        return _error("Invalid data.")
+
+    if username == "None" or username == '':
+        return _error("Invalid data.")
+
+    decoded_hash = str(base64.b64decode(hash)).strip("b").strip("'").strip("'")
+    decoded_hash_split = decoded_hash.split("-")[1].split(":")[0]
+
+    decoded_hash_email = decoded_hash.split("=")[1]
+
+    Timenow = str(now().strftime('%m/%d/%Y-%H:%M:%S'))
+    Timenow_split = Timenow.split("-")[1].split(":")[0]
+
+    daysHash = decoded_hash.split("-")[0].split("/")
+    daysNow = Timenow.split("-")[0].split("/")
+
+    if daysHash[0] != daysNow[0] or daysHash[1] != daysNow[1] or daysHash[2] != daysNow[2]:
+        return _error("Invalid hash")
+
+    try:
+        with sqlconn(DATABASE,
+                     timeout=DB_TIMEOUT) as conn:
+            datab = conn.cursor()
+            datab.execute("""SELECT email
+                FROM Users
+                WHERE
+                username = ?""",
+                          (username,))
+            data = datab.fetchone()
+            if str(decoded_hash_email) != str(''.join(data)):
+                return _error("Invalid hash")
+    except Exception as e:
+        print(e)
+        return _error("Invalid hash")
+
+    if decoded_hash_split < Timenow_split:
+        return _error("Hash expired")
+
+    if username:
+        if user_exists(username):
+            alphabet = string.ascii_letters + string.digits
+            genPassword = ''.join(secrets.choice(alphabet) for i in range(20))
+            try:
+                tmpPass = hashpw(genPassword.encode("utf-8"), gensalt(rounds=BCRYPT_ROUNDS))
+                with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
+                    datab = conn.cursor()
+                    datab.execute("""UPDATE Users
+                            set password = ?
+                            where username = ?""",
+                                (tmpPass, username))
+                    conn.commit()
+                    return jsonify(result="Your password has been changed, you can now login with your new password", password=genPassword, success=True), 200
+            except Exception as e:
+                print(e)
+                return _error(f"Error fetching database")
+        else:
+            return _error("This username doesn't exist")
+    else:
+        return _error("Username not provided")
+
+@app.route("/recovery/")
+@limiter.limit("20 per hour")
+def api_recovery():
+    try:
+        ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
+        username = str(request.args.get('username'))
+    except Exception as e:
+        return _error(f"Invalid data: {e}")
+
+    ip_feed = check_ip(ip_addr)
+    if ip_feed[0]:
+        return _error(ip_feed[1])
+
+    if username:
+        if user_exists(username):
+            try:
+                with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
+                    datab = conn.cursor()
+                    datab.execute("""SELECT * FROM Users WHERE username = ?""", (username,))
+                    email = str(datab.fetchone()[2])
+                try:
+                    message = MIMEMultipart("alternative")
+                    message["Subject"] = "Password Recovery."
+                    message["From"] = DUCO_EMAIL
+                    message["To"] = email
+
+                    hashStr = str((now() + timedelta(hours=0.5)).strftime('%m/%d/%Y-%H:%M:%S')).encode("utf-8")
+
+                    hash = base64.b64encode(hashStr + str("=" + email).encode("utf-8"))
+
+                    recoveryUrl = "https://wallet.duinocoin.com/recovery.html?username=" + username + "&hash=" + str(hash).strip("b").strip("'").strip("'")
+
+                    email_body = html_recovery_template.replace(
+                        "{username}", str(username)).replace(
+                        "{link}", str(recoveryUrl))
+                    part = MIMEText(email_body, "html")
+                    message.attach(part)
+                    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtpserver:
+                        smtpserver.login(DUCO_EMAIL, DUCO_PASS)
+                        smtpserver.sendmail(DUCO_EMAIL, email, message.as_string())
+                    return jsonify(result="Email successfully sent", url=recoveryUrl, success=True), 200
+                except Exception as e:
+                    return _error("Error sending email")
+            except Exception as e:
+                return _error("Error fetching database")
+        else:
+            return _error("This username isn`t registered")
+    else:
+        return _error("Username not provided")
 
 
 registration_db = {}
