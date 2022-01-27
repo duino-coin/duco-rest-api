@@ -1,13 +1,12 @@
-from multiprocessing import cpu_count
-
 bind = "0.0.0.0:5000"
-keyfile = "/etc/letsencrypt/live/server.duinocoin.com/privkey.pem"
-certfile = "/etc/letsencrypt/live/server.duinocoin.com/fullchain.pem"
 
 worker_class = "gevent"
-workers = 6
-backlog = 0
+workers = 3
+worker_connections = 281100
+max_requests = 1500
+max_requests_jitter = 150
 
-graceful_timeout = 5
+graceful_timeout = 15
+keepalive = 64
 timeout = 600
 limit_request_line = 7777
