@@ -66,9 +66,9 @@ html_recovery_template = """\
 <html lang="en-US">
 <head>
     <style type="text/css">
-        @import url('https://fonts.googleapis.com/css2?family=Barlow:wght@300&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Lato:wght@300&display=swap');
         * {
-            font-family: 'Barlow', sans-serif;
+            font-family: 'Lato', sans-serif;
         }
         a:hover {
             text-decoration: none !important;
@@ -115,26 +115,25 @@ html_recovery_template = """\
                     style="max-width:670px;background:#fff; border-radius:3px; text-align:center; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);">
                     <tr>
                         <td style="text-align:center; padding-top: 25px; height:40px; font-size: 32px;">
-                            Hi {username}
+                            Hey there, {username}!
                         </td>
                     </tr>
                     <tr>
                         <td style="padding:0 35px; text-align:center;">
-                            <h1
-                                style="color:#1e1e2d; font-weight:500; margin:0; margin-top: 25px; font-size:16px;">
-                                You have
-                                requested to reset your password</h1>
+                            <h1 style="color:#1e1e2d; font-weight:500; margin:0; margin-top: 25px; font-size:16px;">
+                                You have requested to reset your private key</h1>
                             <span
                                 style="display:inline-block; vertical-align:middle; margin:29px 0 26px; border-bottom:1px solid #cecece; width:100px;"></span>
                             <p style="color:#455056; font-size:15px;line-height:24px; margin:0;">
-                                We cannot simply send you your old password. A unique link to reset your
-                                password has been generated for you. To reset your password, click the
-                                following link and follow the instructions.<br/>
-                                You have 30 minutes to reset your password. 
-                                If you did not request a password reset, please ignore this email.
+                                Because we don't store the private keys directly, we can't just send you your old key.<br>
+                                <b>A unique link to reset your passphrase has been generated for you.</b><br>
+                                To reset your private key, click the following link and follow the instructions.<br>
+                                <b>You have 30 minutes to reset your key.</b><br>
+                                If you did not request a passphrase reset, please ignore this email.
                             </p>
-                            <a href="{link}" class="btn">Reset
-                                Password</a>
+                            <a href="{link}" class="btn">
+                                Reset passphrase
+                            </a>
                         </td>
                     </tr>
                     <tr>
@@ -2443,7 +2442,7 @@ def api_sync_proxy():
 
 
 @app.route("/recovering/<username>")
-@limiter.limit("5 per day")
+@limiter.limit("1 per 1 day")
 def api_recovering(username: str):
     try:
         ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
@@ -2523,7 +2522,7 @@ def api_recovering(username: str):
 
 
 @app.route("/recovery/")
-@limiter.limit("5 per day")
+@limiter.limit("1 per 1 day")
 def api_recovery():
     try:
         ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
@@ -2546,7 +2545,7 @@ def api_recovery():
                     email = str(datab.fetchone()[2])
                 try:
                     message = MIMEMultipart("alternative")
-                    message["Subject"] = "Password Recovery."
+                    message["Subject"] = "🔗 Your Duino-Coin passphrase reset link"
                     message["From"] = DUCO_EMAIL
                     message["To"] = email
 
