@@ -74,9 +74,10 @@ html_recovery_template = """\
             text-decoration: none !important;
         }
         .btn {
-            background: #4f46e5;
+            background: #ff9f43;
             text-decoration: none !important;
             font-weight: semibold;
+            border-radius: 16px;
             margin-top: 35px;
             color: #fff !important;
             text-transform: uppercase;
@@ -85,12 +86,12 @@ html_recovery_template = """\
             display: inline-block;
         }
         .btn:hover {
-            background: #6366f1;
+            background: #feca57;
         }
     </style>
 </head>
-<body marginheight="0" topmargin="0" marginwidth="0" style="margin: 0px; background-color: #eef2ff;" leftmargin="0">
-    <table cellspacing="0" border="0" cellpadding="0" width="100%" bgcolor="#eef2ff"">
+<body marginheight="0" topmargin="0" marginwidth="0" style="margin: 0px; background-color: #fff8ee;" leftmargin="0">
+    <table cellspacing="0" border="0" cellpadding="0" width="100%" bgcolor="#fff8ee"">
         <tr>
             <td>
                 <table style=" background-color: #ffffff; max-width:670px; margin:0 auto;" width="100%" border="0"
@@ -2568,12 +2569,12 @@ def api_recovery():
                         smtpserver.login(DUCO_EMAIL, DUCO_PASS)
                         smtpserver.sendmail(
                             DUCO_EMAIL, email, message.as_string())
-                    return jsonify(result="Email successfully sent", success=True), 200
+                    return jsonify(result="An e-mail has been sent to you with the reset link - please check your mailbox", success=True), 200
                 except Exception as e:
-                    return _error("Error sending email")
+                    return _error("Error sending e-mail, please try again later")
             except Exception as e:
-                return _error("Error fetching database")
+                return _error("Error fetching database, please try again later")
         else:
-            return _error("This username isn't registered")
+            return _error("This username isn't registered, make sure you're entering the correct name")
     else:
         return _error("Username not provided")
