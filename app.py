@@ -230,9 +230,8 @@ chain_accounts = ["bscDUCO", "celoDUCO", "maticDUCO"]
 
 overrides = [
     NodeS_Overide,
-    DUCO_PASS,
-    "3f27d995f6a558b24b83",
-    "9e73ac66bf0ac6983f77"]
+    DUCO_PASS
+]
 
 config = {
     "DEBUG": False,
@@ -928,7 +927,7 @@ def api_auth(username=None):
     global registration_db
     try:
         ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
-        unhashed_pass = str(request.args.get('password', None)).encode('utf-8')
+        unhashed_pass = request.args.get('password', None).encode('utf-8')
     except Exception as e:
         return _error(f"Invalid data: {e}")
 
@@ -964,10 +963,12 @@ def api_auth(username=None):
 def new_api_auth(username=None):
     try:
         ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
-        unhashed_pass_b64 = str(request.args.get(
-            'password', None)).encode('utf-8')
+        unhashed_pass_b64 = request.args.get('password', None)
     except Exception as e:
         return _error(f"Invalid data: {e}")
+
+    if unhashed_pass_b64:
+        unhashed_pass_b64 = str(unhashed_pass_b64).encode('utf-8')
 
     ip_feed = check_ip(ip_addr)
     if ip_feed[0]:
@@ -1069,15 +1070,26 @@ def new_api_get_user_objects(username: str):
 def register():
     global registrations
     try:
-        username = str(request.args.get('username', None))
-        unhashed_pass = str(request.args.get('password', None)).encode('utf-8')
-        email = str(request.args.get('email', None))
+        username = request.args.get('username', None)
+        unhashed_pass = request.args.get('password', None)
+        email = request.args.get('email', None)
         captcha = request.args.get('captcha', None)
         ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
         postdata = {'secret': CAPTCHA_SECRET_KEY,
                     'response': captcha}
     except Exception as e:
         return _error(f"Invalid data: {e}")
+
+    if not username:
+        return _error("No username provided")
+
+    if unhashed_pass:
+        unhashed_pass = str(unhashed_pass).encode('utf-8')
+    else:
+        return _error("No password provided")
+
+    if not email:
+        return _error("No e-mail provided")
 
     ip_feed = check_ip(ip_addr)
     if ip_feed[0]:
@@ -1162,7 +1174,7 @@ def api_wrap_duco(username: str):
 
     dbg("GET/wduco_wrap", username, amount, tron_address)
 
-    login_protocol = login(username, unhashed_pass)
+    login_protocol = login(username, unhashed_pass)`
     if not login_protocol[0]:
         return _error(login_protocol[1])
 
@@ -2435,7 +2447,7 @@ def api_sync_proxy():
 def api_recovering(username: str):
     try:
         ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
-        hash = str(request.args.get('hash'))
+        pwd_hash = request.args.get('hash', None)
     except Exception as e:
         return _error(f"Invalid data: {e}")
 
@@ -2443,13 +2455,13 @@ def api_recovering(username: str):
     if ip_feed[0]:
         return _error(ip_feed[1])
 
-    if hash == "None" or hash == '':
+    if pwd_hash == "None" or pwd_hash == '':
         return _error("Invalid data.")
 
     if username == "None" or username == '':
         return _error("Invalid data.")
 
-    decoded_hash = str(base64.b64decode(hash)).strip("b").strip("'").strip("'")
+    decoded_hash = str(base64.b64decode(pwd_hash)).strip("b").strip("'").strip("'")
     decoded_hash_split = decoded_hash.split("-")[1].split(":")
 
     decoded_hash_email = decoded_hash.split("=")[1]
@@ -2515,7 +2527,8 @@ def api_recovering(username: str):
 def api_recovery():
     try:
         ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
-        username = str(request.args.get('username'))
+        username = request.args.get('username', None)
+        print(repr(username), "recv")
     except Exception as e:
         return _error(f"Invalid data: {e}")
 
@@ -2562,6 +2575,6 @@ def api_recovery():
             except Exception as e:
                 return _error("Error fetching database")
         else:
-            return _error("This username isn`t registered")
+            return _error("This username isn't registered")
     else:
         return _error("Username not provided")
