@@ -1174,7 +1174,7 @@ def api_wrap_duco(username: str):
 
     dbg("GET/wduco_wrap", username, amount, tron_address)
 
-    login_protocol = login(username, unhashed_pass)`
+    login_protocol = login(username, unhashed_pass)
     if not login_protocol[0]:
         return _error(login_protocol[1])
 
