@@ -250,6 +250,7 @@ config = {
     "CACHE_TYPE": "RedisCache",
     "CACHE_REDIS_URL": "redis://localhost:6379/0",
     "CACHE_DEFAULT_TIMEOUT": SAVE_TIME,
+    "SECRET_KEY": DUCO_PASS,
     "JSONIFY_PRETTYPRINT_REGULAR": False}
 
 limiter = Limiter(
@@ -266,8 +267,6 @@ ip_ban = IpBan(
     secret_key=DUCO_PASS)
 
 app = Flask(__name__, template_folder='config/error_pages')
-
-app.config['SECRET_KEY'] = 'ChangeMe'
 
 app.config.from_mapping(config)
 cache = Cache(app)
@@ -542,8 +541,8 @@ def login(username: str, unhashed_pass: str):
             with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
                 datab = conn.cursor()
                 datab.execute("""
-                    SELECT * 
-                    FROM Users 
+                    SELECT *
+                    FROM Users
                     WHERE username = ?""",
                             (username, ))
                 email = datab.fetchone()[2]
@@ -680,7 +679,7 @@ def get_transactions(username: str, limit=10, reverse=True):
         with sqlconn(CONFIG_TRANSACTIONS, timeout=DB_TIMEOUT) as conn:
             datab = conn.cursor()
             datab.execute("""
-                SELECT * FROM ( 
+                SELECT * FROM (
                     SELECT * FROM Transactions
                     WHERE username = ?
                     OR recipient = ?
@@ -786,8 +785,8 @@ def get_user_data(username: str):
     with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
         datab = conn.cursor()
         datab.execute("""
-            SELECT * 
-            FROM Users 
+            SELECT *
+            FROM Users
             WHERE username = ?""",
                       (username, ))
         row = datab.fetchone()
@@ -808,8 +807,8 @@ def is_verified(username: str):
         with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
             datab = conn.cursor()
             datab.execute("""
-                SELECT * 
-                FROM Users 
+                SELECT *
+                FROM Users
                 WHERE username = ?""",
                           (username, ))
             row = datab.fetchone()
@@ -911,9 +910,9 @@ def poolfetchdb():
         with sqlconn(POOL_DATABASE) as conn:
             datab = conn.cursor()
             datab.execute(
-                """SELECT name, ip, port, Status, ram, 
-                cpu, connections, lastsync 
-                FROM PoolList 
+                """SELECT name, ip, port, Status, ram,
+                cpu, connections, lastsync
+                FROM PoolList
                 WHERE hidden != 'True'""")
             rows = datab.fetchall()
 
@@ -1020,16 +1019,18 @@ def api_auth_check(username=None):
             with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
                 datab = conn.cursor()
                 datab.execute("""
-                    SELECT * 
-                    FROM Users 
+                    SELECT *
+                    FROM Users
                     WHERE username = ?""",
                               (username, ))
                 email = datab.fetchone()[2]
                 if data['email'] == email:
                     return _success(["Logged in", email])
         except Exception as e:
+            print(traceback.format_exc())
             return _error('Auth token is invalid')
-    except:
+    except Exception as e:
+        print(traceback.format_exc())
         return _error('Auth token is invalid')
 
 
@@ -1071,8 +1072,8 @@ def new_api_auth(username=None):
             with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
                 datab = conn.cursor()
                 datab.execute("""
-                    SELECT * 
-                    FROM Users 
+                    SELECT *
+                    FROM Users
                     WHERE username = ?""",
                               (username, ))
                 email = datab.fetchone()[2]
@@ -1085,12 +1086,12 @@ def new_api_auth(username=None):
         login_protocol = login(username, unhashed_pass)
         if login_protocol[0] == True:
             threading.Thread(target=alt_check, args=[ip_addr, username]).start()
-            token = jwt.encode({'email': email, 'exp' : datetime.datetime.utcnow() + datetime.timedelta(minutes=60)}, app.config['SECRET_KEY'], algorithm='HS256')  
-            return _success([login_protocol[1], email, token.decode('UTF-8')])
+            token = jwt.encode({'email': email, 'exp' : datetime.datetime.utcnow() + datetime.timedelta(minutes=60)}, app.config['SECRET_KEY'], algorithm='HS256')
+            return _success([login_protocol[1], email, token])
         else:
             return _error(login_protocol[1])
     except Exception as e:
-        print(e)
+        print(traceback.format_exc())
         return _error("Invalid password")
 
 
@@ -1510,8 +1511,8 @@ def api_tx_by_id(tx_id: str):
     with sqlconn(CONFIG_TRANSACTIONS, timeout=DB_TIMEOUT) as conn:
         datab = conn.cursor()
         datab.execute("""
-            SELECT * 
-            FROM Transactions 
+            SELECT *
+            FROM Transactions
             WHERE id = ?""",
                       (tx_id, ))
         row = datab.fetchone()
@@ -1536,8 +1537,8 @@ def api_tx_by_hash(hash: str):
     with sqlconn(CONFIG_TRANSACTIONS, timeout=DB_TIMEOUT) as conn:
         datab = conn.cursor()
         datab.execute("""
-            SELECT * 
-            FROM Transactions 
+            SELECT *
+            FROM Transactions
             WHERE hash = ?""",
                       (hash, ))
         row = datab.fetchone()
