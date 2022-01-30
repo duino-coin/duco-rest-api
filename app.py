@@ -61,6 +61,7 @@ from Server import (
 from validate_email import validate_email
 from wrapped_duco_functions import *
 import datetime
+import jwt
 
 TOKENS_DATABASE = CONFIG_BASE_DIR + '/tempTokens.db'
 
@@ -265,6 +266,9 @@ ip_ban = IpBan(
     secret_key=DUCO_PASS)
 
 app = Flask(__name__, template_folder='config/error_pages')
+
+app.config['SECRET_KEY'] = 'ChangeMe'
+
 app.config.from_mapping(config)
 cache = Cache(app)
 limiter.init_app(app)
@@ -490,43 +494,65 @@ cached_logins = {}
 def login(username: str, unhashed_pass: str):
     global cached_logins
 
-    if not match(r"^[A-Za-z0-9_-]*$", username):
-        return (False, "Incorrect username")
-
-    if username in cached_logins:
-        if unhashed_pass == cached_logins[username]:
-            return (True, "Logged in")
-        else:
-            return (False, "Invalid password")
-
     try:
-        with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
-            datab = conn.cursor()
-            datab.execute(
-                """SELECT *
-                    FROM Users
-                    WHERE username = ?""",
-                (str(username),))
-            data = datab.fetchone()
+        try:
+            data = jwt.decode(unhashed_pass, app.config['SECRET_KEY'], algorithms=['HS256'])
+        except jwt.ExpiredSignatureError:
+            return (False, 'Token expired. Please log in again.')
+        except jwt.DecodeError: # if the token is invalid
+            if not match(r"^[A-Za-z0-9_-]*$", username):
+                return (False, "Incorrect username")
 
-        if len(data) > 1:
-            stored_password = data[1]
-        else:
-            return (False, "No user found")
+            if username in cached_logins:
+                if unhashed_pass == cached_logins[username]:
+                    return (True, "Logged in")
+                else:
+                    return (False, "Invalid password")
+
+            try:
+                with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
+                    datab = conn.cursor()
+                    datab.execute(
+                        """SELECT *
+                            FROM Users
+                            WHERE username = ?""",
+                        (str(username),))
+                    data = datab.fetchone()
+
+                if len(data) > 1:
+                    stored_password = data[1]
+                else:
+                    return (False, "No user found")
+
+                try:
+                    if checkpw(unhashed_pass, stored_password):
+                        cached_logins[username] = unhashed_pass
+                        return (True, "Logged in")
+                    return (False, "Invalid password")
+
+                except Exception:
+                    if checkpw(unhashed_pass, stored_password.encode('utf-8')):
+                        cached_logins[username] = unhashed_pass
+                        return (True, "Logged in")
+                    return (False, "Invalid password")
+            except Exception as e:
+                return (False, "DB Err: " + str(e))
 
         try:
-            if checkpw(unhashed_pass, stored_password):
-                cached_logins[username] = unhashed_pass
-                return (True, "Logged in")
-            return (False, "Invalid password")
-
-        except Exception:
-            if checkpw(unhashed_pass, stored_password.encode('utf-8')):
-                cached_logins[username] = unhashed_pass
-                return (True, "Logged in")
-            return (False, "Invalid password")
+            with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
+                datab = conn.cursor()
+                datab.execute("""
+                    SELECT * 
+                    FROM Users 
+                    WHERE username = ?""",
+                            (username, ))
+                email = datab.fetchone()[2]
+                if data['email'] == email:
+                    return (True, "Logged in")
+        except Exception as e:
+            return (False, "DB Err:" + str(e))
     except Exception as e:
-        return (False, "DB Err: " + str(e))
+        print(e)
 
 
 def check_ip(ip):
@@ -969,6 +995,44 @@ def api_auth(username=None):
         return _error("Invalid password")
 
 
+
+@app.route("/v2/auth/check/<username>")
+@limiter.limit("6 per 1 minute")
+def api_auth_check(username=None):
+    try:
+        ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
+        token = request.args.get('token', None)
+    except Exception as e:
+        return _error(f"Invalid data: {e}")
+
+    ip_feed = check_ip(ip_addr)
+    if ip_feed[0]:
+        return _error(ip_feed[1])
+
+    try:
+        try:
+            data = jwt.decode(token, app.config['SECRET_KEY'], algorithms=['HS256'])
+        except jwt.ExpiredSignatureError:
+            return _error('Signature expired. Please log in again.')
+        except jwt.InvalidTokenError:
+            return _error('Invalid token. Please log in again.')
+        try:
+            with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
+                datab = conn.cursor()
+                datab.execute("""
+                    SELECT * 
+                    FROM Users 
+                    WHERE username = ?""",
+                              (username, ))
+                email = datab.fetchone()[2]
+                if data['email'] == email:
+                    return _success(["Logged in", email])
+        except Exception as e:
+            return _error('Auth token is invalid')
+    except:
+        return _error('Auth token is invalid')
+
+
 @app.route("/v2/auth/<username>")
 @limiter.limit("6 per 1 minute")
 def new_api_auth(username=None):
@@ -1020,12 +1084,13 @@ def new_api_auth(username=None):
 
         login_protocol = login(username, unhashed_pass)
         if login_protocol[0] == True:
-            threading.Thread(target=alt_check, args=[
-                             ip_addr, username]).start()
-            return _success([login_protocol[1], email])
+            threading.Thread(target=alt_check, args=[ip_addr, username]).start()
+            token = jwt.encode({'email': email, 'exp' : datetime.datetime.utcnow() + datetime.timedelta(minutes=60)}, app.config['SECRET_KEY'], algorithm='HS256')  
+            return _success([login_protocol[1], email, token.decode('UTF-8')])
         else:
             return _error(login_protocol[1])
-    except:
+    except Exception as e:
+        print(e)
         return _error("Invalid password")
 
 
@@ -2263,14 +2328,20 @@ def api_transaction():
                         FROM Users
                         WHERE username = ?""",
                     (str(username),))
-                stored_password = datab.fetchone()[1]
-
+                user = datab.fetchone()
+                stored_password = user[1]
+                stored_email = user[2]
             try:
-                if not checkpw(unhashed_pass, stored_password):
-                    return _error("NO,Invalid password")
-            except:
-                if not checkpw(unhashed_pass, stored_password.encode('utf-8')):
-                    return _error("NO,Invalid password")
+                data = jwt.decode(unhashed_pass.decode("utf-8"), app.config['SECRET_KEY'], algorithms=['HS256'])
+                if data["email"] != stored_email:
+                    return _error("NO,Invalid token")
+            except Exception as e:
+                try:
+                    if not checkpw(unhashed_pass, stored_password):
+                        return _error("NO,Invalid password")
+                except:
+                    if not checkpw(unhashed_pass, stored_password.encode('utf-8')):
+                        return _error("NO,Invalid password")
         except Exception as e:
             print(e)
             return _error("NO,No user found: " + str(e))
