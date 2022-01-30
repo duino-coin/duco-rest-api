@@ -1086,7 +1086,7 @@ def new_api_auth(username=None):
         login_protocol = login(username, unhashed_pass)
         if login_protocol[0] == True:
             threading.Thread(target=alt_check, args=[ip_addr, username]).start()
-            token = jwt.encode({'email': email, 'exp' : datetime.datetime.utcnow() + datetime.timedelta(minutes=60)}, app.config['SECRET_KEY'], algorithm='HS256')
+            token = jwt.encode({'email': email, 'exp' : datetime.datetime.utcnow() + datetime.timedelta(hours=12)}, app.config['SECRET_KEY'], algorithm='HS256')
             return _success([login_protocol[1], email, token])
         else:
             return _error(login_protocol[1])
