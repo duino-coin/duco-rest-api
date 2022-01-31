@@ -2559,13 +2559,40 @@ def api_recovering(username: str):
             data = datab.fetchone()
 
             if data is None:
+                try:
+                    with sqlconn(TOKENS_DATABASE, timeout=DB_TIMEOUT) as conn:
+                        datab = conn.cursor()
+                        datab.execute(
+                            """DELETE FROM tmpTokens
+                            WHERE username = ?""",
+                            (username,))
+                except Exception as e:
+                    return _error("Error connecting to DataBase")
                 return _error("Invalid token.")
 
             hashDate = datetime.datetime.strptime(data[3], '%m/%d/%Y-%H:%M:%S')
             if now() > hashDate:
+                try:
+                    with sqlconn(TOKENS_DATABASE, timeout=DB_TIMEOUT) as conn:
+                        datab = conn.cursor()
+                        datab.execute(
+                            """DELETE FROM tmpTokens
+                            WHERE username = ?""",
+                            (username,))
+                except Exception as e:
+                    return _error("Error connecting to DataBase")
                 return _error("Invalid time.")
 
             if pwd_hash != data[2]:
+                try:
+                    with sqlconn(TOKENS_DATABASE, timeout=DB_TIMEOUT) as conn:
+                        datab = conn.cursor()
+                        datab.execute(
+                            """DELETE FROM tmpTokens
+                            WHERE username = ?""",
+                            (username,))
+                except Exception as e:
+                    return _error("Error connecting to DataBase")
                 return _error("Invalid hash.")
     except Exception as e:
         print(e)
