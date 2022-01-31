@@ -2559,17 +2559,44 @@ def api_recovering(username: str):
             data = datab.fetchone()
 
             if data is None:
-                return _error("Invalid token.")
+                try:
+                    with sqlconn(TOKENS_DATABASE, timeout=DB_TIMEOUT) as conn:
+                        datab = conn.cursor()
+                        datab.execute(
+                            """DELETE FROM tmpTokens
+                            WHERE username = ?""",
+                            (username,))
+                except Exception as e:
+                    return _error("Error connecting to database")
+                return _error("Invalid token")
 
             hashDate = datetime.datetime.strptime(data[3], '%m/%d/%Y-%H:%M:%S')
             if now() > hashDate:
-                return _error("Invalid time.")
+                try:
+                    with sqlconn(TOKENS_DATABASE, timeout=DB_TIMEOUT) as conn:
+                        datab = conn.cursor()
+                        datab.execute(
+                            """DELETE FROM tmpTokens
+                            WHERE username = ?""",
+                            (username,))
+                except Exception as e:
+                    return _error("Error connecting to database")
+                return _error("Invalid time")
 
             if pwd_hash != data[2]:
-                return _error("Invalid hash.")
+                try:
+                    with sqlconn(TOKENS_DATABASE, timeout=DB_TIMEOUT) as conn:
+                        datab = conn.cursor()
+                        datab.execute(
+                            """DELETE FROM tmpTokens
+                            WHERE username = ?""",
+                            (username,))
+                except Exception as e:
+                    return _error("Error connecting to database")
+                return _error("Invalid hash")
     except Exception as e:
         print(e)
-        return _error("Error connecting to DataBase")
+        return _error("Error connecting to database")
 
     try:
         with sqlconn(DATABASE,
@@ -2626,7 +2653,6 @@ def api_recovery():
     try:
         ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
         username = request.args.get('username', None)
-        print(repr(username), "recv")
     except Exception as e:
         return _error(f"Invalid data: {e}")
 
