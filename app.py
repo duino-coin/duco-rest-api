@@ -63,17 +63,6 @@ from wrapped_duco_functions import *
 import datetime
 import jwt
 
-TOKENS_DATABASE = CONFIG_BASE_DIR + '/tempTokens.db'
-
-try:
-    with sqlconn(TOKENS_DATABASE, timeout=DB_TIMEOUT) as conn:
-        datab = conn.cursor()
-        datab.execute(
-            """CREATE TABLE IF NOT EXISTS tmpTokens (username VARCHAR(255), email VARCHAR(255), token VARCHAR(255), time VARCHAR(255))""")
-        conn.commit()
-except Exception as e:
-    print(e)
-
 html_recovery_template = """\
 <html lang="en-US">
 <head>
@@ -2538,114 +2527,54 @@ def api_recovering(username: str):
     if ip_feed[0]:
         return _error(ip_feed[1])
 
-    if pwd_hash == "None" or pwd_hash == '':
-        return _error("Invalid data.")
-
-    if username == "None" or username == '':
-        return _error("Invalid data.")
-
-    decoded_hash = str(base64.b64decode(pwd_hash)).strip("b").strip("'").strip("'")
-    decoded_hash_email = decoded_hash.split("=")[1]
-
     try:
-        with sqlconn(TOKENS_DATABASE, timeout=DB_TIMEOUT) as conn:
-            datab = conn.cursor()
-            datab.execute(
-                """SELECT *
-                FROM tmpTokens
-                WHERE
-                username = ?""",
-                (username,))
-            data = datab.fetchone()
+        token_hash = jwt.decode(pwd_hash, app.config['SECRET_KEY'], algorithms=['HS256'])
+    except jwt.ExpiredSignatureError:
+        return _error('Signature expired. Please log in again.')
+    except jwt.InvalidTokenError:
+        return _error('Invalid token. Please log in again.')
 
-            if data is None:
-                try:
-                    with sqlconn(TOKENS_DATABASE, timeout=DB_TIMEOUT) as conn:
-                        datab = conn.cursor()
-                        datab.execute(
-                            """DELETE FROM tmpTokens
-                            WHERE username = ?""",
-                            (username,))
-                except Exception as e:
-                    return _error("Error connecting to database")
-                return _error("Invalid token")
+    if username is None or username == '':
+        return _error("Invalid username.")
 
-            hashDate = datetime.datetime.strptime(data[3], '%m/%d/%Y-%H:%M:%S')
-            if now() > hashDate:
-                try:
-                    with sqlconn(TOKENS_DATABASE, timeout=DB_TIMEOUT) as conn:
-                        datab = conn.cursor()
-                        datab.execute(
-                            """DELETE FROM tmpTokens
-                            WHERE username = ?""",
-                            (username,))
-                except Exception as e:
-                    return _error("Error connecting to database")
-                return _error("Invalid time")
+    if username != token_hash['username']:
+        return _error("Invalid username.")
 
-            if pwd_hash != data[2]:
-                try:
-                    with sqlconn(TOKENS_DATABASE, timeout=DB_TIMEOUT) as conn:
-                        datab = conn.cursor()
-                        datab.execute(
-                            """DELETE FROM tmpTokens
-                            WHERE username = ?""",
-                            (username,))
-                except Exception as e:
-                    return _error("Error connecting to database")
-                return _error("Invalid hash")
-    except Exception as e:
-        print(e)
-        return _error("Error connecting to database")
+    if user_exists(username):
+        try:
+            with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
+                datab = conn.cursor()
+                datab.execute("""SELECT * FROM Users WHERE username = ?""",(username,))
+                data = datab.fetchone()
 
-    try:
-        with sqlconn(DATABASE,
-                    timeout=DB_TIMEOUT) as conn:
-            datab = conn.cursor()
-            datab.execute("""SELECT email
-                FROM Users
-                WHERE
-                username = ?""",
-                        (username,))
-            data = datab.fetchone()
-            if str(decoded_hash_email) != str(''.join(data)):
-                return _error("Invalid hash")
-    except Exception as e:
-        print(e)
-        return _error("Invalid hash")
+                if data is None:
+                    return _error("Invalid username.")
 
-    if username:
-        if user_exists(username):
-            alphabet = string.ascii_letters + string.digits
-            genPassword = ''.join(secrets.choice(alphabet) for i in range(20))
-            try:
-                tmpPass = hashpw(genPassword.encode("utf-8"),
-                                gensalt(rounds=BCRYPT_ROUNDS))
-                try:
-                    with sqlconn(TOKENS_DATABASE, timeout=DB_TIMEOUT) as conn:
-                        datab = conn.cursor()
-                        datab.execute(
-                            """DELETE FROM tmpTokens
-                            WHERE username = ?""",
-                            (username,))
-                except Exception as e:
-                    return _error("Error connecting to DataBase")
+                if token_hash['email'] != data[2]:
+                    return _error("Invalid token.")
+        except Exception as e:
+            print(e)
+            return _error("Error connecting to DataBase")
 
-                with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
-                    datab = conn.cursor()
-                    datab.execute("""UPDATE Users
-                            set password = ?
-                            where username = ?""",
-                                (tmpPass, username))
-                    conn.commit()
-                    return jsonify(result="Your password has been changed, you can now login with your new password", password=genPassword, success=True), 200
-            except Exception as e:
-                print(e)
-                return _error(f"Error fetching database")
-        else:
-            return _error("This username doesn't exist")
+        alphabet = string.ascii_letters + string.digits
+        genPassword = ''.join(secrets.choice(alphabet) for i in range(20))
+        try:
+            tmpPass = hashpw(genPassword.encode("utf-8"),
+                            gensalt(rounds=BCRYPT_ROUNDS))
+
+            with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
+                datab = conn.cursor()
+                datab.execute("""UPDATE Users
+                        set password = ?
+                        where username = ?""",
+                            (tmpPass, username))
+                conn.commit()
+                return jsonify(result="Your password has been changed, you can now login with your new password", password=genPassword, success=True), 200
+        except Exception as e:
+            print(e)
+            return _error(f"Error fetching database")
     else:
-        return _error("Username not provided")
+        return _error("This username doesn't exist")
 
 @app.route("/recovery/")
 @limiter.limit("1 per 1 day")
@@ -2653,6 +2582,7 @@ def api_recovery():
     try:
         ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
         username = request.args.get('username', None)
+        print(repr(username), "recv")
     except Exception as e:
         return _error(f"Invalid data: {e}")
 
@@ -2674,28 +2604,12 @@ def api_recovery():
                     message["From"] = DUCO_EMAIL
                     message["To"] = email
 
-                    hashStr = str(
-                        (now() + timedelta(minutes=30)).strftime('%m/%d/%Y-%H:%M:%S')).encode("utf-8")
+                    time = datetime.datetime.utcnow() + datetime.timedelta(minutes=30)
 
-                    hash = base64.b64encode(
-                        hashStr + str("=" + email).encode("utf-8"))
-
+                    hash = jwt.encode({'username': username, 'email': email, 'exp' : time}, app.config['SECRET_KEY'], algorithm='HS256')  
                     recoveryUrl = "https://wallet.duinocoin.com/recovery.html?username=" + \
                         username + "&hash=" + \
                         str(hash).strip("b").strip("'").strip("'")
-
-                    try:
-                        with sqlconn(TOKENS_DATABASE, timeout=DB_TIMEOUT) as conn:
-                            datab = conn.cursor()
-                            datab.execute(
-                                """INSERT INTO tmpTokens
-                                (username, email, token, time)
-                                VALUES(?, ?, ?, ?)""",
-                                (str(username), str(email), str(hash, 'utf-8'), str(hashStr, 'utf-8')))
-                            conn.commit()
-                    except Exception as e:
-                        print(e)
-                        return _error("Error connecting to DataBase")
 
                     email_body = html_recovery_template.replace(
                         "{username}", str(username)).replace(
