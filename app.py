@@ -595,7 +595,9 @@ def ip_addr_ban(ip, perm=False):
 
 
 def _success(result, code=200):
-    return jsonify(result=result, success=True, server=SERVER_NAME), code
+    response = jsonify(result=result, success=True, server=SERVER_NAME)
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    return response, code
 
 
 def _error(result, code=200):
@@ -616,7 +618,9 @@ def _error(result, code=200):
         sleep(observations[ip_addr])
         return render_template('403.html'), 403
     else:
-        return jsonify(message=result, success=False, server=SERVER_NAME), code
+        response = jsonify(message=result, success=False, server=SERVER_NAME)
+        response.headers.add('Access-Control-Allow-Origin', '*')
+        return response, code
 
 
 def _proxy():
@@ -1589,7 +1593,9 @@ def get_api_data():
         except:
             pass
 
-    return jsonify(data)
+    response = jsonify(data)
+    response.headers.add('Access-Control-Allow-Origin', '*')
+    return response
 
 
 @app.route("/ip")
@@ -2569,7 +2575,9 @@ def api_recovering(username: str):
                         where username = ?""",
                             (tmpPass, username))
                 conn.commit()
-                return jsonify(result="Your password has been changed, you can now login with your new password", password=genPassword, success=True), 200
+                response = jsonify(result="Your password has been changed, you can now login with your new password", password=genPassword, success=True)
+                response.headers.add('Access-Control-Allow-Origin', '*')
+                return response, 200
         except Exception as e:
             print(e)
             return _error(f"Error fetching database")
@@ -2620,7 +2628,9 @@ def api_recovery():
                         smtpserver.login(DUCO_EMAIL, DUCO_PASS)
                         smtpserver.sendmail(
                             DUCO_EMAIL, email, message.as_string())
-                    return jsonify(result="An e-mail has been sent to you with the reset link - please check your mailbox", success=True), 200
+                        response = jsonify(result="An e-mail has been sent to you with the reset link - please check your mailbox", success=True)
+                        response.headers.add('Access-Control-Allow-Origin', '*')
+                        return response, 200
                 except Exception as e:
                     return _error("Error sending e-mail, please try again later")
             except Exception as e:
