@@ -2612,7 +2612,7 @@ def api_recovery():
                     message["From"] = DUCO_EMAIL
                     message["To"] = email
 
-                    time = datetime.datetime.utcnow() + datetime.timedelta(minutes=5)
+                    time = datetime.datetime.utcnow() + datetime.timedelta(minutes=30)
 
                     hash = jwt.encode({'username': username, 'email': email, 'exp' : time}, app.config['SECRET_KEY'], algorithm='HS256')  
                     recoveryUrl = "https://wallet.duinocoin.com/recovery.html?username=" + \
