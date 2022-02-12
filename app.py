@@ -56,7 +56,7 @@ from Server import (
     BCRYPT_ROUNDS, user_exists, SOCKET_TIMEOUT,
     email_exists, send_registration_email, protocol_ban, protocol_loved_verified_mail,
     DECIMALS, CONFIG_BANS, protocol_verified_mail, protocol_unverified_mail,
-    CONFIG_JAIL, CONFIG_WHITELIST, perm_ban, POOL_DATABASE,
+    CONFIG_JAIL, CONFIG_WHITELIST, perm_ban,
     NodeS_Overide, CAPTCHA_SECRET_KEY, CONFIG_BASE_DIR)
 from validate_email import validate_email
 from wrapped_duco_functions import *
@@ -224,7 +224,7 @@ NANO_SECRET_KEY = os.getenv('NANO_SECRET_KEY')
 EXCHANGE_MAIL = DUCO_EMAIL
 SERVER_NAME = "duino-master-1"
 
-IP_CHECK_DISABLED = True
+IP_CHECK_DISABLED = False
 XXHASH_TX_PROB = 30
 POOL_SYNC_TIME = 15
 chain_accounts = ["bscDUCO", "celoDUCO", "maticDUCO"]
@@ -1863,15 +1863,16 @@ def exchange_request():
         print(traceback.format_exc())
 
     # Check the amount
-    if amount < 200:
-        return _error("Minimum exchangeable amount is 200 DUCO")
-    if amount > 10000:
-        return _error("Maximum exchangeable amount is 10000 DUCO.")
-
-    #acccheck = acc_check(address, username)
-    # if acccheck[0]:
-    #    jail.append(username)
-    #    return _error(f"This address is associated with another account(s): {acccheck[1]}")
+    if ex_type.upper() == "SELL":
+        if amount < 200:
+            return _error("Minimum sellable amount is 200 DUCO")
+        if amount > 10000:
+            return _error("Maximum sellable amount is 10k DUCO")
+    else:
+        if amount < 1:
+            return _error("Minimum buyable amount is 1 DUCO")
+        if amount > 200000:
+            return _error("Maximum buyable amount is 200k DUCO")
 
     if ex_type.upper() == "SELL":
         balance = get_user_data(username)["balance"]
@@ -1917,6 +1918,8 @@ def exchange_request():
                 coin_txid = bch_key.send([(str(address),
                                            float(exchanged_amount), 'bch')],
                                          unspents=bch_key.get_unspents())
+                if not coin_txid:
+                    raise Exception("No txid")
                 dbg("EX: Sent BCH", coin_txid)
             except Exception as e:
                 print("EX: Error sending BCH", traceback.format_exc())
@@ -1930,6 +1933,8 @@ def exchange_request():
                     + f"?username=revox&recipient={address}"
                     + f"&password={DUCO_PASS}&amount={exchanged_amount}"
                     + f"&memo=DUCO Exchange payment").json()
+                if not coin_txid:
+                    raise Exception("No txid")
                 if "result" in coin_txid:
                     coin_txid = coin_txid["result"].split(",")[2]
                     dbg("EX: Sent XMG", coin_txid)
@@ -1944,6 +1949,8 @@ def exchange_request():
             try:
                 coin_txid = trx_key.trx.send_transaction(str(address),
                                                          float(exchanged_amount-1))["txid"]
+                if not coin_txid:
+                    raise Exception("No txid")
                 dbg("EX: Sent TRX", coin_txid)
             except Exception as e:
                 print("EX: Error sending TRX", traceback.format_exc())
@@ -1954,6 +1961,8 @@ def exchange_request():
             try:
                 coin_txid = likecoin_transaction(str(address), int(
                     exchanged_amount), "DUCO Exchange payment")
+                if not coin_txid:
+                    raise Exception("No txid")
                 dbg("EX: Sent LKE", coin_txid)
             except Exception as e:
                 print("EX: Error sending LKE", traceback.format_exc())
@@ -1964,6 +1973,8 @@ def exchange_request():
             try:
                 coin_txid = nano_key.send(
                     str(address), float(exchanged_amount))
+                if not coin_txid:
+                    raise Exception("No txid")
                 dbg("EX: Sent NANO", coin_txid)
             except Exception as e:
                 print("EX: Error sending NANO", traceback.format_exc())
@@ -2439,7 +2450,7 @@ def api_transaction():
 def api_sync_proxy():
     pool_id = request.args.get('identifier')
     if not pool_id:
-        return _error("Invalid pool ID", 400)
+        return _error("Invalid pool ID")
     with sqlconn(POOL_DATABASE, timeout=DB_TIMEOUT) as conn:
         datab = conn.cursor()
         datab.execute(
@@ -2449,7 +2460,7 @@ def api_sync_proxy():
             (pool_id,)
         )
         if not datab.fetchone():
-            return _error('Invalid pool ID', 400)
+            return _error('Invalid pool ID')
     try:
         if request.method == 'POST':
             rewards = request.files['rewards']
@@ -2459,8 +2470,6 @@ def api_sync_proxy():
             workers = request.files['workers']
             filename = secure_filename(workers.filename)
             workers.save(os.path.join("/home/debian/websites/", filename))
-
-            # dbg("Downloaded files from", request.args.get('name', None))
     except Exception as e:
         print(traceback.format_exc())
 
