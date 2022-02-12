@@ -2437,6 +2437,19 @@ def api_transaction():
 @app.route("/pool_sync/", methods=['GET', 'POST'])
 @limiter.limit("10 per 1 minute")
 def api_sync_proxy():
+    pool_id = request.args.get('identifier')
+    if not pool_id:
+        return _error("Invalid pool ID", 400)
+    with sqlconn('config/pools_database.db', timeout=DB_TIMEOUT) as conn:
+        datab = conn.cursor()
+        datab.execute(
+            """SELECT *
+            FROM PoolList
+            WHERE identifier = ?""",
+            (pool_id,)
+        )
+        if not datab.fetchone():
+            return _error('Invalid pool ID', 400)
     try:
         if request.method == 'POST':
             rewards = request.files['rewards']
