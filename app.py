@@ -56,7 +56,7 @@ from Server import (
     BCRYPT_ROUNDS, user_exists, SOCKET_TIMEOUT,
     email_exists, send_registration_email, protocol_ban, protocol_loved_verified_mail,
     DECIMALS, CONFIG_BANS, protocol_verified_mail, protocol_unverified_mail,
-    CONFIG_JAIL, CONFIG_WHITELIST, perm_ban,
+    CONFIG_JAIL, CONFIG_WHITELIST, perm_ban, POOL_DATABASE,
     NodeS_Overide, CAPTCHA_SECRET_KEY, CONFIG_BASE_DIR)
 from validate_email import validate_email
 from wrapped_duco_functions import *
@@ -2440,7 +2440,7 @@ def api_sync_proxy():
     pool_id = request.args.get('identifier')
     if not pool_id:
         return _error("Invalid pool ID", 400)
-    with sqlconn('config/pools_database.db', timeout=DB_TIMEOUT) as conn:
+    with sqlconn(POOL_DATABASE, timeout=DB_TIMEOUT) as conn:
         datab = conn.cursor()
         datab.execute(
             """SELECT *
