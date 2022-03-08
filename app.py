@@ -9,6 +9,7 @@ import gevent.monkey
 gevent.monkey.patch_all()
 from werkzeug.utils import secure_filename
 import string
+import redis
 import secrets
 from datetime import timedelta
 from functools import reduce
@@ -62,6 +63,7 @@ from validate_email import validate_email
 from wrapped_duco_functions import *
 import datetime
 import jwt
+
 
 html_recovery_template = """\
 <html lang="en-US">
@@ -209,7 +211,7 @@ fees = {
     "duco": 0,
     "xmg": 0.05,
     "lke": 0,
-    "bch": 0.0000023,
+    "bch": 0.00006,
     "trx": 1,
     "nano": 0
 }
@@ -224,6 +226,8 @@ NANO_SECRET_KEY = os.getenv('NANO_SECRET_KEY')
 EXCHANGE_MAIL = DUCO_EMAIL
 SERVER_NAME = "duino-master-1"
 
+STAKE_DAYS = 14
+STAKING_PERC = 1.5
 IP_CHECK_DISABLED = False
 XXHASH_TX_PROB = 30
 POOL_SYNC_TIME = 15
@@ -241,6 +245,8 @@ config = {
     "CACHE_DEFAULT_TIMEOUT": SAVE_TIME,
     "SECRET_KEY": DUCO_PASS,
     "JSONIFY_PRETTYPRINT_REGULAR": False}
+proxy_redis = redis.Redis(host='localhost', port=6379, db=1)
+auth_redis = redis.Redis(host='localhost', port=6379, db=2)
 
 limiter = Limiter(
     key_func=forwarded_ip_check,
@@ -281,7 +287,7 @@ network = {
 
 last_transactions_update, last_miners_update, last_balances_update = 0, 0, 0
 miners, balances, transactions = [], [], []
-rate_count, last_transfer, checked_ips = {}, {}, {}
+rate_count, last_transfer = {}, {}
 banlist, jailedusr, registrations, whitelisted_usr = [], [], [], []
 registration_db = {}
 
@@ -293,7 +299,8 @@ with open('config/emails/buy_email.html', 'r') as file:
     html_buy = file.read()
 with open('config/emails/sell_error.html', 'r') as file:
     html_error = file.read()
-
+with open('config/emails/stake_finished.html', 'r') as file:
+    html_stake_finished = file.read()
 
 def fetch_bans():
     global jail, banlist, whitelisted_usr, whitelist
@@ -527,16 +534,9 @@ def login(username: str, unhashed_pass: str):
                 return (False, "DB Err: " + str(e))
 
         try:
-            with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
-                datab = conn.cursor()
-                datab.execute("""
-                    SELECT *
-                    FROM Users
-                    WHERE username = ?""",
-                            (username, ))
-                email = datab.fetchone()[2]
-                if data['email'] == email:
-                    return (True, "Logged in")
+            email = get_email(username)
+            if data['email'] == email:
+                return (True, "Logged in")
         except Exception as e:
             return (False, "DB Err:" + str(e))
     except Exception as e:
@@ -544,20 +544,19 @@ def login(username: str, unhashed_pass: str):
 
 
 def check_ip(ip):
-    global checked_ips
     global IP_CHECK_DISABLED
     try:
-        if IP_CHECK_DISABLED:
-            return (False, None)
+        if IP_CHECK_DISABLED or ip in whitelist:
+            return "False,None"
 
         elif not ip:
-            return (True, "Your IP address is hidden")
+            return "True,Your IP address is hidden"
 
-        elif ip in whitelist:
-            return (False, None)
-
-        elif ip in checked_ips:
-            return checked_ips[ip]
+        elif proxy_redis.get(ip):
+            if "," in proxy_redis.get(ip).decode():
+                if "True" in proxy_redis.get(ip).decode():
+                    print(ip, "is cached", proxy_redis.get(ip).decode())
+                return proxy_redis.get(ip).decode()
 
         try:
             response = requests_session.get(
@@ -567,22 +566,22 @@ def check_ip(ip):
             if "proxy" in response[ip]:
                 if response[ip]["proxy"] == "yes":
                     dbg("Proxy detected: " + str(ip))
-                    checked_ips[ip] = (True, "You're using a proxy")
-                    # threading.Thread(target=ip_addr_ban, args=[ip, True]).start()
-                    return checked_ips[ip]
+
+                    proxy_redis.get(ip, "True,You're using a proxy")
+                    return "True,You're using a proxy"
             if "vpn" in response[ip]:
                 if response[ip]["vpn"] == "yes":
                     dbg("VPN detected: " + str(ip))
-                    checked_ips[ip] = (True, "You're using a VPN")
-                    # threading.Thread(target=ip_addr_ban, args=[ip, True]).start()
-                    return checked_ips[ip]
+                    
+                    proxy_redis.get(ip, "True,You're using a VPN")
+                    return "True,You're using a VPN"
         except:
             IP_CHECK_DISABLED = True
-        else:
-            checked_ips[ip] = (False, None)
-            return (False, None)
+
+        proxy_redis.get(ip, "False,None")
+        return "False,None"
     except Exception as e:
-        return (False, None)
+        return "False,None"
 
 
 def ip_addr_ban(ip, perm=False):
@@ -783,12 +782,234 @@ def get_user_data(username: str):
     if not row:
         raise Exception(f"{username} not found")
 
+    try:
+        stake = str(row[7]).split(",")
+        stake_date = int(stake[0])
+        stake_amount = float(stake[1])
+    except:
+        stake_date, stake_amount = 0, 0
+
+    if stake_date != 0 and stake_date <= time():
+        print(username, "is elgible for stake rewards!")
+        unstake(username)
+
+    login_date = auth_redis.get(username)
+    if not login_date:
+        login_date = 0
+    else:
+        login_date = round(float(login_date))
+
     return {
-        "username": username,
+        "username": str(username),
         "balance": round(row[3], DECIMALS),
-        "verified": row[5].lower(),
-        "created": row[4].lower()
+        "verified": str(row[5]).lower(),
+        "created": str(row[4]).lower(),
+        "stake_date": stake_date,
+        "stake_amount": round(stake_amount, DECIMALS),
+        "last_login": login_date,
     }
+
+def get_email(username):
+    with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
+        datab = conn.cursor()
+        datab.execute("""
+            SELECT *
+            FROM Users
+            WHERE username = ?""",
+                    (username, ))
+        return datab.fetchone()[2]
+
+
+def send_stake_email(username, amount, txid):
+    try:
+        email = get_email(username)
+        
+        message = MIMEMultipart("alternative")
+        message["Subject"] = "🥰 Your DUCO staking has just finished!"
+        message["From"] = DUCO_EMAIL
+        message["To"] = email
+
+        email_body = html_stake_finished.replace(
+            "{txid}", str(txid)
+        ).replace(
+            "{user}", str(username)
+        ).replace(
+            "{amount}", str(amount)
+        )
+        part = MIMEText(email_body, "html")
+        message.attach(part)
+        context = ssl.create_default_context()
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as smtp:
+            smtp.login(
+                DUCO_EMAIL, DUCO_PASS)
+            smtp.sendmail(
+                DUCO_EMAIL, email, message.as_string())
+    except Exception:
+        print(traceback.format_exc())
+
+def unstake(username: str):
+    try:
+        with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
+            datab = conn.cursor()
+            datab.execute(
+                """SELECT *
+                        FROM Users
+                        WHERE username = ?""",
+                (username,))
+            balance = float(datab.fetchone()[3])
+            stake_data = str(datab.fetchone()[7])
+
+        try:
+            stake_balance = float(stake_data.split(",")[1])
+        except Exception as e:
+            return _error("Nothing to unstake")
+
+        try:
+            stake_date = int(stake_data.split(",")[0])
+        except Exception as e:
+            return _error("No staking active")
+
+        stake_reward = float(stake_balance) * (1 + (STAKING_PERC/100))
+        balance += round(stake_reward, DECIMALS)
+        stake_data = 0
+
+        while True:
+            try:
+                with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
+                    datab = conn.cursor()
+                    datab.execute(
+                        """UPDATE Users
+                        set balance = ?
+                        where username = ?""",
+                        (balance, username))
+                    datab.execute(
+                        """UPDATE Users
+                        set stake = ?
+                        where username = ?""",
+                        (stake_data, username))
+                    conn.commit()
+                    break
+            except:
+                pass
+
+        global_last_block_hash_cp = get_txid()
+        formatteddatetime = now().strftime("%d/%m/%Y %H:%M:%S")
+        with sqlconn(CONFIG_TRANSACTIONS,
+                     timeout=DB_TIMEOUT) as conn:
+            datab = conn.cursor()
+            datab.execute(
+                """INSERT INTO Transactions
+                (timestamp, username, recipient, amount, hash, memo)
+                VALUES(?, ?, ?, ?, ?, ?)""",
+                (formatteddatetime,
+                    "Duino-Coin Masternode",
+                    username,
+                    stake_reward,
+                    global_last_block_hash_cp,
+                    "Staking rewards"))
+            conn.commit()
+
+        dbg(f"Success: unstaked {stake_reward} DUCO from {username}")
+        threading.Thread(
+            target=send_stake_email,
+            args=[username, amount, global_last_block_hash_cp]
+        ).start()
+        return _success(f"Unstaked,{global_last_block_hash_cp}")
+    except Exception as e:
+        print(e)
+        return _error(e)
+
+def stake(username: str, amount: float, days: int):
+    try:
+        stake_end = datetime.date.today() + datetime.timedelta(int(days))
+        stake_end_unix = int(stake_end.strftime("%s"))
+        dbg(f"{username}'s stake for {amount} DUCO will end {stake_end}")
+
+        if int(days) <= 0:
+            return _error("Incorrect days")
+
+        if (str(amount) == "" or float(amount) < 20):
+            return _error("Incorrect amount")
+
+        with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
+            datab = conn.cursor()
+            datab.execute(
+                """SELECT *
+                        FROM Users
+                        WHERE username = ?""",
+                (username,))
+            row = datab.fetchone()
+
+        balance = float(row[3])
+        stake_data = str(row[7])
+
+        try:
+            stake_balance = float(stake_data.split(",")[1])
+        except Exception as e:
+            stake_balance = 0
+
+        try:
+            stake_date_old = int(stake_data.split(",")[0])
+        except Exception as e:
+            stake_date_old = 0
+
+        if stake_date_old > time() or stake_balance > 0:
+            return _error(f"You are already staking {stake_balance} DUCO, "
+                          + "please wait for the current stake to finish")
+
+        if (float(balance) <= float(amount)):
+            return _error("Incorrect amount")
+
+        if float(balance) >= float(amount):
+            balance -= float(amount)
+            stake_balance += float(amount)
+            stake_data = f"{stake_end_unix},{stake_balance}"
+
+            while True:
+                try:
+                    with sqlconn(DATABASE,
+                                 timeout=DB_TIMEOUT) as conn:
+                        datab = conn.cursor()
+                        datab.execute(
+                            """UPDATE Users
+                            set balance = ?
+                            where username = ?""",
+                            (balance, username))
+                        datab.execute(
+                            """UPDATE Users
+                            set stake = ?
+                            where username = ?""",
+                            (stake_data, username))
+                        conn.commit()
+                        break
+                except:
+                    pass
+
+            global_last_block_hash_cp = get_txid()
+            formatteddatetime = now().strftime("%d/%m/%Y %H:%M:%S")
+            with sqlconn(CONFIG_TRANSACTIONS,
+                         timeout=DB_TIMEOUT) as conn:
+                datab = conn.cursor()
+                datab.execute(
+                    """INSERT INTO Transactions
+                    (timestamp, username, recipient, amount, hash, memo)
+                    VALUES(?, ?, ?, ?, ?, ?)""",
+                    (formatteddatetime,
+                        username,
+                        "Duino-Coin Masternode",
+                        amount,
+                        global_last_block_hash_cp,
+                        "Staking deposit"))
+                conn.commit()
+
+            dbg(f"Success: staked {amount} DUCO from {username}")
+            last_transfer[username] = now()
+            return _success(f"Successfully staked {amount} DUCOs,{global_last_block_hash_cp}")
+    except Exception as e:
+        print(e)
+        return _error(e)
+
 
 
 def is_verified(username: str):
@@ -852,8 +1073,8 @@ def all_pools():
     except Exception as e:
         return _error(f"Invalid data: {e}")
 
-    ip_feed = check_ip(ip_addr)
-    if ip_feed[0]:
+    ip_feed = check_ip(ip_addr).split(",")
+    if ip_feed[0] == "True":
         return _error(ip_feed[1])
 
     try:
@@ -888,8 +1109,8 @@ def all_pools():
         return _error(str(e))
 
 
-@cache.cached(timeout=5)
-def poolfetchdb():
+#@cache.cached(timeout=5)
+def poolfetchdb(ip_addr):
     try:
         def lowest_load(curr, prev):
             if (prev[4]*2 + prev[5]) < (curr[4]*2 + curr[5]):
@@ -925,6 +1146,7 @@ def poolfetchdb():
             "ip": str(best_pool[1]),
             "port": int(best_pool[2]),
             "server": str(SERVER_NAME),
+            "client": str(ip_addr),
             "success": True
         }
         return to_return
@@ -939,12 +1161,28 @@ def getpool():
     except Exception as e:
         return _error(f"Invalid data: {e}")
 
-    ip_feed = check_ip(ip_addr)
-    if ip_feed[0]:
+    ip_feed = check_ip(ip_addr).split(",")
+    if ip_feed[0] == "True":
         return _error(ip_feed[1])
 
-    return poolfetchdb()
+    return poolfetchdb(ip_addr)
 
+@app.route("/stake/<username>")
+@limiter.limit("3 per 1 minute")
+def api_create_stake(username=None):
+    try:
+        ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
+        unhashed_pass = request.args.get('password', None).encode('utf-8')
+        amount = request.args.get('amount', None)
+        days = STAKE_DAYS # request.args.get('days', None)
+    except Exception as e:
+        return _error(f"Invalid data: {e}")
+
+    login_protocol = login(username, unhashed_pass)
+    if login_protocol[0] == True:
+        return stake(username, amount, days)
+    else:
+        return _error(login_protocol[1])
 
 @app.route("/auth/<username>")
 @limiter.limit("6 per 1 minute")
@@ -959,8 +1197,8 @@ def api_auth(username=None):
     if not user_exists(username) or not username:
         return _error(f"This user doesn't exist (auth): {username}")
 
-    ip_feed = check_ip(ip_addr)
-    if ip_feed[0]:
+    ip_feed = check_ip(ip_addr).split(",")
+    if ip_feed[0] == "True":
         return _error(ip_feed[1])
 
     # dbg("/GET/auth", username, unhashed_pass.decode())
@@ -976,6 +1214,7 @@ def api_auth(username=None):
         if login_protocol[0] == True:
             threading.Thread(target=alt_check, args=[
                              ip_addr, username]).start()
+            auth_redis.set(username, time())
             return _success(login_protocol[1])
         else:
             return _error(login_protocol[1])
@@ -993,8 +1232,8 @@ def api_auth_check(username=None):
     except Exception as e:
         return _error(f"Invalid data: {e}")
 
-    ip_feed = check_ip(ip_addr)
-    if ip_feed[0]:
+    ip_feed = check_ip(ip_addr).split(",")
+    if ip_feed[0] == "True":
         return _error(ip_feed[1])
 
     try:
@@ -1005,16 +1244,13 @@ def api_auth_check(username=None):
         except jwt.InvalidTokenError:
             return _error('Invalid token. Please log in again.')
         try:
-            with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
-                datab = conn.cursor()
-                datab.execute("""
-                    SELECT *
-                    FROM Users
-                    WHERE username = ?""",
-                              (username, ))
-                email = datab.fetchone()[2]
-                if data['email'] == email:
-                    return _success(["Logged in", email])
+            email = get_email(username)
+            if data['email'] == email:
+                auth_redis.set(username, time())
+                return _success([
+                    "Logged in", email,
+                    get_miner_password(username, True)
+                ])
         except Exception as e:
             print(traceback.format_exc())
             return _error('Auth token is invalid')
@@ -1035,8 +1271,8 @@ def new_api_auth(username=None):
     if unhashed_pass_b64:
         unhashed_pass_b64 = str(unhashed_pass_b64).encode('utf-8')
 
-    ip_feed = check_ip(ip_addr)
-    if ip_feed[0]:
+    ip_feed = check_ip(ip_addr).split(",")
+    if ip_feed[0] == "True":
         return _error(ip_feed[1])
 
     try:
@@ -1058,25 +1294,22 @@ def new_api_auth(username=None):
             return _error(f"This user doesn't exist (auth 2): {username}")
 
         try:
-            with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
-                datab = conn.cursor()
-                datab.execute("""
-                    SELECT *
-                    FROM Users
-                    WHERE username = ?""",
-                              (username, ))
-                email = datab.fetchone()[2]
+            email = get_email(username)
         except:
             email = "unknown"
 
         if unhashed_pass.decode() in overrides:
-            return _success(["Logged in (override)", email])
+            return _success(["Logged in (override)", email, get_miner_password(username, True)])
 
         login_protocol = login(username, unhashed_pass)
         if login_protocol[0] == True:
             threading.Thread(target=alt_check, args=[ip_addr, username]).start()
             token = jwt.encode({'email': email, 'exp' : datetime.datetime.utcnow() + datetime.timedelta(minutes=60)}, app.config['SECRET_KEY'], algorithm='HS256')
-            return _success([login_protocol[1], email, token])
+            auth_redis.set(username, time())
+            return _success([
+                login_protocol[1], email, token, 
+                get_miner_password(username, True)
+            ])
         else:
             return _error(login_protocol[1])
     except Exception as e:
@@ -1157,8 +1390,8 @@ def register():
     if not email:
         return _error("No e-mail provided")
 
-    ip_feed = check_ip(ip_addr)
-    if ip_feed[0]:
+    ip_feed = check_ip(ip_addr).split(",")
+    if ip_feed[0] == "True":
         return _error(ip_feed[1])
 
     #altcheck = alt_check(ip_addr, username)
@@ -1579,15 +1812,15 @@ def api_get_all_miners():
 
 
 @app.route("/statistics")
-@cache.cached(timeout=30)
+@cache.cached(timeout=15)
 def get_api_data():
-    # dbg("/GET/statistics")
+    dbg("/GET/statistics")
     data = {}
     with open(API_JSON_URI, 'r') as f:
         try:
             data = load(f)
-        except:
-            pass
+        except Exception as e:
+            print(e)
 
     return jsonify(data)
 
@@ -1790,10 +2023,11 @@ def send_exchange_error(error, email, txid, username, amount):
     except Exception:
         print(traceback.format_exc())
 
-
+exchange_requests = []
 @app.route("/exchange_request/")
 @limiter.limit("4 per 1 day")
 def exchange_request():
+    global exchange_requests
     try:
         username = str(request.args.get('username', None))
         unhashed_pass = request.args.get('password', None).encode('utf-8')
@@ -1808,10 +2042,13 @@ def exchange_request():
 
     dbg("EX:", username, email)
 
+    if username in exchange_requests:
+        return _error("You have already used DUCO exchange today!")
+
     # return _error("Exchange requests on DUCO Exchange are currently disabled, use other exchange")
 
-    ip_feed = check_ip(ip_addr)
-    if ip_feed[0]:
+    ip_feed = check_ip(ip_addr).split(",")
+    if ip_feed[0] == "True":
         return _error(ip_feed[1])
 
     if is_verified(username) != "yes":
@@ -1830,7 +2067,7 @@ def exchange_request():
                     WHERE username = ?""",
                 (str(username),))
             stored_mail = datab.fetchone()[2]
-        if not email == stored_mail:
+        if not email.lower() == str(stored_mail).lower():
             return _error(
                 "This e-mail is not associated with your Duino-Coin account")
     except Exception as e:
@@ -1915,14 +2152,19 @@ def exchange_request():
             try:
                 if len(str(address)) == 34:
                     address = str(convert.to_cash_address(address))
-                coin_txid = bch_key.send([(str(address),
-                                           float(exchanged_amount), 'bch')],
-                                         unspents=bch_key.get_unspents())
+                try:
+                    coin_txid = bch_key.send([(str(address),
+                                               float(exchanged_amount), 'bch')],
+                                             unspents=bch_key.get_unspents())
+                except:
+                    coin_txid = bch_key.send([(str(address),
+                                               float(exchanged_amount), 'bch')],
+                                             combine=True)
                 if not coin_txid:
                     raise Exception("No txid")
                 dbg("EX: Sent BCH", coin_txid)
             except Exception as e:
-                print("EX: Error sending BCH", traceback.format_exc())
+                print("EX: Error sending BCH\n", traceback.format_exc())
                 send_exchange_error(str(e), email, duco_txid, username, amount)
 
         elif coin.lower() == "xmg":
@@ -2222,6 +2464,7 @@ def exchange_request():
         except Exception:
             return _success("Error deducting balance")
 
+    exchange_requests.append(username)
     return _success("Your exchange request has been successfully submited")
 
 
@@ -2256,8 +2499,8 @@ def api_transaction():
         return _error("NO,Recipient doesn\'t exist")
 
     if not username in chain_accounts:
-        ip_feed = check_ip(ip_addr)
-        if ip_feed[0]:
+        ip_feed = check_ip(ip_addr).split(",")
+        if ip_feed[0] == "True":
             return _error(ip_feed[1])
 
     # return _error("Temporarily disabled")
@@ -2450,17 +2693,16 @@ def api_transaction():
 def api_sync_proxy():
     pool_id = request.args.get('identifier')
     if not pool_id:
-        return _error("Invalid pool ID")
+        return _error("No pool ID")
     with sqlconn(POOL_DATABASE, timeout=DB_TIMEOUT) as conn:
         datab = conn.cursor()
         datab.execute(
             """SELECT *
             FROM PoolList
             WHERE identifier = ?""",
-            (pool_id,)
-        )
+            (pool_id,))
         if not datab.fetchone():
-            return _error('Invalid pool ID')
+            return _error(f'Invalid pool ID: {pool_id}')
     try:
         if request.method == 'POST':
             rewards = request.files['rewards']
@@ -2545,8 +2787,8 @@ def api_recovering(username: str):
     except Exception as e:
         return _error(f"Invalid data: {e}")
 
-    ip_feed = check_ip(ip_addr)
-    if ip_feed[0]:
+    ip_feed = check_ip(ip_addr).split(",")
+    if ip_feed[0] == "True":
         return _error(ip_feed[1])
 
     try:
@@ -2604,50 +2846,132 @@ def api_recovery():
     try:
         ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
         username = request.args.get('username', None)
-        print(repr(username), "recv")
     except Exception as e:
         return _error(f"Invalid data: {e}")
 
-    ip_feed = check_ip(ip_addr)
-    if ip_feed[0]:
+    ip_feed = check_ip(ip_addr).split(",")
+    if ip_feed[0] == "True":
         return _error(ip_feed[1])
 
     if username:
         if user_exists(username):
+            email = get_email(username)
             try:
-                with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
-                    datab = conn.cursor()
-                    datab.execute(
-                        """SELECT * FROM Users WHERE username = ?""", (username,))
-                    email = str(datab.fetchone()[2])
-                try:
-                    message = MIMEMultipart("alternative")
-                    message["Subject"] = "🔗 Your Duino-Coin passphrase reset link"
-                    message["From"] = DUCO_EMAIL
-                    message["To"] = email
+                message = MIMEMultipart("alternative")
+                message["Subject"] = "🔗 Your Duino-Coin passphrase reset link"
+                message["From"] = DUCO_EMAIL
+                message["To"] = email
 
-                    time = datetime.datetime.utcnow() + datetime.timedelta(minutes=30)
+                time = datetime.datetime.utcnow() + datetime.timedelta(minutes=30)
 
-                    hash = jwt.encode({'username': username, 'email': email, 'exp' : time}, app.config['SECRET_KEY'], algorithm='HS256')  
-                    recoveryUrl = "https://wallet.duinocoin.com/recovery.html?username=" + \
-                        username + "&hash=" + \
-                        str(hash).strip("b").strip("'").strip("'")
+                hash = jwt.encode({'username': username, 'email': email, 'exp' : time}, app.config['SECRET_KEY'], algorithm='HS256')  
+                recoveryUrl = "https://wallet.duinocoin.com/recovery.html?username=" + \
+                    username + "&hash=" + \
+                    str(hash).strip("b").strip("'").strip("'")
 
-                    email_body = html_recovery_template.replace(
-                        "{username}", str(username)).replace(
-                        "{link}", str(recoveryUrl))
-                    part = MIMEText(email_body, "html")
-                    message.attach(part)
-                    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtpserver:
-                        smtpserver.login(DUCO_EMAIL, DUCO_PASS)
-                        smtpserver.sendmail(
-                            DUCO_EMAIL, email, message.as_string())
-                    return jsonify(result="An e-mail has been sent to you with the reset link - please check your mailbox", success=True), 200
-                except Exception as e:
-                    return _error("Error sending e-mail, please try again later")
+                email_body = html_recovery_template.replace(
+                    "{username}", str(username)).replace(
+                    "{link}", str(recoveryUrl))
+                part = MIMEText(email_body, "html")
+                message.attach(part)
+                with smtplib.SMTP_SSL("smtp.gmail.com", 465) as smtpserver:
+                    smtpserver.login(DUCO_EMAIL, DUCO_PASS)
+                    smtpserver.sendmail(
+                        DUCO_EMAIL, email, message.as_string())
+                return jsonify(result="An e-mail has been sent to you with the reset link - please check your mailbox", success=True), 200
             except Exception as e:
-                return _error("Error fetching database, please try again later")
+                return _error("Error sending e-mail, please try again later")
         else:
             return _error("This username isn't registered, make sure you're entering the correct name")
     else:
         return _error("Username not provided")
+
+
+def change_miner_password(username, miner_pass):
+    try:
+        with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
+            datab = conn.cursor()
+            datab.execute("""UPDATE Users
+                            set miner_password = ?
+                            where username = ?""",
+                            (miner_pass, username))
+            conn.commit()
+            return True
+    except:
+        return False
+
+def get_miner_password(username, decode=False):
+    try:
+        with sqlconn(DATABASE, timeout=DB_TIMEOUT) as conn:
+            datab = conn.cursor()
+            datab.execute(
+                """SELECT *
+                    FROM Users
+                    WHERE username = ?""",
+                (str(username),))
+            key = datab.fetchone()[6]
+
+            if decode:
+                try:
+                    if key == "0" or not key:
+                        return "None"
+                    return str(base64.b64decode(key).decode())
+                except Exception as e:
+                    print(e)
+                    return str(e)
+
+            return key
+    except Exception as e:
+        return _error(f"Database error: {e}")
+
+@app.route("/mining_key", methods = ["GET", "POST"])
+@limiter.limit("20 per 5 minutes")
+def api_mining_key():
+    try:
+        ip_addr = request.environ.get('HTTP_X_REAL_IP', request.remote_addr)
+        miner_pass = str(request.args.get('k', None)).encode('utf-8')
+        username = request.args.get('u', None)
+        if request.method == 'POST':
+            unhashed_pass = request.args.get('password', None).encode('utf-8')
+    except Exception as e:
+        return _error(f"Invalid data: {e}")
+
+    try:
+        miner_pass = base64.b64encode(miner_pass)
+    except Exception as e:
+        return _error(f"Base64 error: {e}")
+    print(miner_pass)
+    if not username:
+        return _error("No username specified")
+
+    if request.method == 'POST':
+        login_protocol = login(username, unhashed_pass)
+        if login_protocol[0] == True:
+            try:
+                change_miner_password(username, miner_pass)
+                return _success("Changed mining key")
+            except Exception as e:
+                return _error(f"Error changing key: {e}")
+        else:
+            return _error(login_protocol[1])
+    else:
+        stored_key = get_miner_password(username)
+
+        print("Got:", miner_pass, "Have:", stored_key)
+        
+        if not stored_key or str(stored_key) == "0":
+            return {
+                "success": True,
+                "has_key": False
+            }
+
+        if miner_pass == stored_key:
+            return {
+                "success": True,
+                "has_key": True
+            }
+        else:
+            return {
+                "success": False,
+                "has_key": True
+            }
