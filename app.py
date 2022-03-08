@@ -3,7 +3,7 @@
 Duino-Coin REST API © MIT licensed
 https://duinocoin.com
 https://github.com/revoxhere/duco-rest-api
-Duino-Coin Team & Community 2019-2021
+Duino-Coin Team & Community 2019-2022
 """
 import gevent.monkey
 gevent.monkey.patch_all()
