@@ -28,7 +28,8 @@ API endpoints can be accessed on the `https://server.duinocoin.com/<endpoint>` U
 ## API Endpoints
 
 - User data
-  - `/users/<username>` - return username's balance, last transactions and miners in one request [example](#usersusername)
+  - `/users/<username>` - return username's balance, verification info, last transactions and miners in one request [example](#usersusername)
+  - `/v2/users/<username>` - return username's balance, verification info, last transactions, miners, bought items and current DUCO prices in one request
   - `/auth/<username>?password=<password>` - check username's password
 
 - Transactions
@@ -41,6 +42,7 @@ API endpoints can be accessed on the `https://server.duinocoin.com/<endpoint>` U
 - Miners
   - `/miners` - return **all** miners [example](#miners)
   - `/miners/<username>` - return username's miners
+  - `/mining_key` - set or check user's mining key [example](#mining_key)
 
 - Balances
   - `/balances` - return **all** balances [example](#balances)
@@ -50,6 +52,8 @@ API endpoints can be accessed on the `https://server.duinocoin.com/<endpoint>` U
   - `/statistics` - return server statistics (same as /api.json) [example](#statistics)
   - `/exchange_request/?username=<username>&password=<password>&email=<email>&type=<ex_type>&amount=<amount>&coin=<coin>&address=<address>` - submit exchange request in the DUCO Exchange
   - `/all_pools` - return all non-hidden mining pools
+  - `/shop_items` - return all buyable shop items [example](#shop_items)
+  - `/shop_buy/<username>` - buy an item from the shop [example](#shop_buyusername)
 
 ##
 
@@ -230,6 +234,64 @@ API endpoints can be accessed on the `https://server.duinocoin.com/<endpoint>` U
         "user": "dansinclair25"
       }
     ]
+  }
+  ```
+  
+### `/mining_key`
+
+- GET: Required arguments: `u` (username), `k` (mining key)
+
+  Example GET success response of an user with key enabled:
+  ```json
+  {
+    "success": true,
+    "has_key": true
+  }
+  ```
+- POST: Required arguments: `u` (username), `k` (mining key), `password` (user password to authenticate)
+
+  Example POST success response:
+  ```json
+  {
+    "success": true,
+    "result": "Changed mining key"
+  }
+  ```
+  
+### `/shop_items`
+
+- Example GET success response:
+  ```json
+  {
+    "result": {
+      "1": {
+        "description": "Stylish hat for your Duino profile. Cosmetic item from the release collection",
+        "display": true,
+        "icon": "https://server.duinocoin.com/assets/items/1.png",
+        "name": "Christmas hat",
+        "price": 100
+      },
+      "2": {
+        "description": "Hell yeah, now you're the best. Cosmetic item from the release collection",
+        "display": true,
+        "icon": "https://server.duinocoin.com/assets/items/2.png",
+        "name": "Sunglasses",
+        "price": 250
+      }
+    },
+    "success": true
+  }
+  ```
+  
+### `/shop_buy/<username>`
+
+- Required arguments: `item` (numerical ID of the item), `password` (user password)
+
+  Example GET success response:
+  ```json
+  {
+    "success": true,
+    "result": "Item bought"
   }
   ```
 
