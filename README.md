@@ -17,7 +17,7 @@
 This repository contains the source code and documentation for the Duino-Coin REST API that's currently in use on the Duino-Coin master server.<br>
 It's worth noting that this is a forked version of dansinclair25's original [duco-rest-api](https://github.com/dansinclair25/duco-rest-api).<br>
 
-API endpoints can be accessed on the `https://server.duinocoin.com/<endpoint>` URL.
+### API endpoints can be accessed on the `https://server.duinocoin.com/<endpoint>` URL.
 
 #### Host it yourself
 
