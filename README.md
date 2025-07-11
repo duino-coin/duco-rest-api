@@ -33,14 +33,14 @@ It's worth noting that this is a forked version of dansinclair25's original [duc
   - `/auth/<username>?password=<password>` - check username's password
 
 - Transactions
-  - `/transactions` - return **all** transactions [example](#transactions)
-  - `/user_transactions/<username>` - return transactions related to username
+  - `/transactions` - return **all** transactions [example](#transactions), you can also use the URL parameter `?username=<username>` to return transactions of a specific username.
+  - `/user_transactions/<username>?limit=[Integer]` - return transactions related to username, use limit parameter to load more than 5 transaction at a time.
   - `/id_transactions/<id>` - return a transaction with that id
   - `/transactions/<hash>` - return a transaction with that hash [example](#transactionshash)
   - `/transaction?username=<username>&password=<password>&recipient=<recipient>&amount=<amount>&memo=memo` - transfer funds from username to recipient
 
 - Miners
-  - `/miners` - return **all** miners [example](#miners)
+  - `/miners` - return **all** miners [example](#miners), you can also use the URL parameter `?username=<username>` to return transactions of a specific username.
   - `/miners/<username>` - return username's miners
   - `/mining_key` - set or check user's mining key [example](#mining_key)
 
