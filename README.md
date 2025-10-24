@@ -19,11 +19,11 @@ It's worth noting that this is a forked version of dansinclair25's original [duc
 
 ### API endpoints can be accessed on the `https://server.duinocoin.com/<endpoint>` URL.
 
-#### Host it yourself
+<!--#### Host it yourself
 
 1. Install requirements using `pip3 install -r requirements.txt`
 2. Run it using `gunicorn app:app` 
-3. Locally, this is available on `127.0.0.1:5000`
+3. Locally, this is available on `127.0.0.1:5000`-->
 
 ## API Endpoints
 
